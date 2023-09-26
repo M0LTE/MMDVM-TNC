@@ -28,10 +28,10 @@ jobs:
           #define INITIAL_MODE    2
 
           // TX Delay in milliseconds
-          #define TX_DELAY        300
+          #define TX_DELAY        25
 
           // P-Persistence in x/255
-          #define P_PERSISTENCE   63
+          #define P_PERSISTENCE   255
 
           // Slot Time in milliseconds
           #define SLOT_TIME       100
@@ -61,11 +61,12 @@ jobs:
       - name: Build simplex firmware
         run: |
           make dvm
-          cp bin/mmdvm_f4.hex firmware/mmdvm_f4_simplex.hex
+          cp bin/mmdvm_f4.hex firmware/mmdvm-f4-simplex.hex
+          cp firmware/mmdvm_f4_simplex.hex firmware/mmdvm-f4-simplex-${{ env.sha_short }}.hex
       - name: Archive built firmware
         uses: actions/upload-artifact@v3
         with:
-          name: mmdvm_f4_simplex.hex
+          name: mmdvm-f4-simplex.hex
           path: bin/mmdvm_f4.hex
       - name: Reconfigure duplex 1
         run: sed -i 's/DUPLEX          0/DUPLEX          1/g' Config.h
@@ -73,15 +74,16 @@ jobs:
         run: |
           make clean
           make dvm
-          cp bin/mmdvm_f4.hex firmware/mmdvm_f4_duplex.hex
+          cp bin/mmdvm_f4.hex firmware/mmdvm-f4-duplex.hex
+          cp firmware/mmdvm-f4-duplex.hex firmware/mmdvm-f4-duplex-${{ env.sha_short }}.hex
       - name: Archive built firmware
         uses: actions/upload-artifact@v3
         with:
-          name: mmdvm_f4_duplex.hex
+          name: mmdvm-f4-duplex.hex
           path: bin/mmdvm_f4.hex
       - uses: jakejarvis/s3-sync-action@master
         with:
-          args: --acl public-read --delete
+          args: --acl public-read
         env:
           AWS_S3_BUCKET: mmdvm-tnc
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
