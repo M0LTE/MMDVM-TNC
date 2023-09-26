@@ -32,7 +32,7 @@ jobs:
           #define INITIAL_MODE    2
 
           // TX Delay in milliseconds
-          #define TX_DELAY        25
+          #define TX_DELAY        100
 
           // P-Persistence in x/255
           #define P_PERSISTENCE   255
