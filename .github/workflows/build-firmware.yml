@@ -62,7 +62,7 @@ jobs:
         run: |
           make dvm
           cp bin/mmdvm_f4.hex firmware/mmdvm-f4-simplex.hex
-          cp firmware/mmdvm_f4_simplex.hex firmware/mmdvm-f4-simplex-${{ env.sha_short }}.hex
+          cp firmware/mmdvm-f4-simplex.hex firmware/mmdvm-f4-simplex-${{ env.sha_short }}.hex
       - name: Archive built firmware
         uses: actions/upload-artifact@v3
         with:
