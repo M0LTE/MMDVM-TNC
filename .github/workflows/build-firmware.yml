@@ -32,10 +32,13 @@ jobs:
           #define INITIAL_MODE    2
 
           // TX Delay in milliseconds
-          #define TX_DELAY        100
+          #define TX_DELAY        300
+
+          // TX Tail in milliseconds
+          #define	TX_TAIL		50    
 
           // P-Persistence in x/255
-          #define P_PERSISTENCE   255
+          #define P_PERSISTENCE   63
 
           // Slot Time in milliseconds
           #define SLOT_TIME       100
@@ -60,6 +63,7 @@ jobs:
 
           // Use pins to output the current mode via LEDs
           #define MODE_LEDS" > Config.h
+
       - name: Make output dir
         run: mkdir firmware
       - name: Build simplex firmware
