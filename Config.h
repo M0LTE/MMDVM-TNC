@@ -41,6 +41,7 @@
 // Select the initial packet mode
 // 1 = 1200 bps AFSK AX.25
 // 2 = 9600 bps C4FSK IL2P
+// 3 = 19200 bps C4FSK IL2P
 #define	INITIAL_MODE	2
 
 // TX Delay in milliseconds
@@ -72,6 +73,9 @@
 
 // Set the mode 2 transmit level (out of 255)
 #define	MODE2_TX_LEVEL	128
+
+// Set the mode 3 transmit level (out of 255)
+#define	MODE3_TX_LEVEL	128
 
 // Use pins to output the current mode via LEDs
 #define MODE_LEDS

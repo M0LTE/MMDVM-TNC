@@ -29,7 +29,7 @@ m_rxBuffer(RX_RINGBUFFER_SIZE),
 m_txBuffer(TX_RINGBUFFER_SIZE),
 m_rxLevel(RX_LEVEL * 128),
 m_pPersist(P_PERSISTENCE),
-m_slotTime((SLOT_TIME / 10U) * 240U),
+m_slotTime((SLOT_TIME / 10U) * 480U),
 m_dcd(false),
 m_ledCount(0U),
 m_ledValue(true),
@@ -108,7 +108,7 @@ void CIO::process()
 #if defined(CONSTANT_SRV_LED)
   setLEDInt(true);
 #else
-  if (m_ledCount >= 24000U) {
+  if (m_ledCount >= 48000U) {
     m_ledCount = 0U;
     m_ledValue = !m_ledValue;
     setLEDInt(m_ledValue);
@@ -155,6 +155,10 @@ void CIO::process()
       case 2U:
         mode2RX.samples(samples, RX_BLOCK_SIZE);
         break;
+
+      case 3U:
+        mode3RX.samples(samples, RX_BLOCK_SIZE);
+        break;
     }
   }
 }
@@ -188,6 +192,12 @@ void CIO::showMode()
       setMode1Int(false);
       setMode2Int(true);
       setMode3Int(false);
+      setMode4Int(false);
+      break;
+    case 3U:
+      setMode1Int(false);
+      setMode2Int(false);
+      setMode3Int(true);
       setMode4Int(false);
       break;
     default:
@@ -225,7 +235,7 @@ void CIO::setPPersist(uint8_t value)
 
 void CIO::setSlotTime(uint8_t value)
 {
-  m_slotTime = value * 240U;
+  m_slotTime = value * 480U;
 }
 
 bool CIO::canTX() const

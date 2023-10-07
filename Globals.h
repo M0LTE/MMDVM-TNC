@@ -48,13 +48,15 @@
 #include "AX25TX.h"
 #include "Mode2RX.h"
 #include "Mode2TX.h"
+#include "Mode3RX.h"
+#include "Mode3TX.h"
 #include "Debug.h"
 #include "IO.h"
 
 const uint16_t RX_BLOCK_SIZE = 2U;
 
-const uint16_t TX_RINGBUFFER_SIZE = 500U;
-const uint16_t RX_RINGBUFFER_SIZE = 600U;
+const uint16_t TX_RINGBUFFER_SIZE = 1000U;
+const uint16_t RX_RINGBUFFER_SIZE = 1200U;
 
 #if defined(STM32F105xC) || defined(__MK20DX256__)
 const uint16_t TX_BUFFER_LEN = 2000U;
@@ -75,6 +77,9 @@ extern CAX25TX ax25TX;
 
 extern CMode2TX mode2TX;
 extern CMode2RX mode2RX;
+
+extern CMode3TX mode3TX;
+extern CMode3RX mode3RX;
 
 #endif
 

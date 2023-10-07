@@ -20,16 +20,14 @@
 
 #include "KISSDefines.h"
 #include "Globals.h"
-#include "Mode2RX.h"
+#include "Mode3RX.h"
 #include "Utils.h"
 
-// Generated using rcosdesign(0.2, 8, 10, 'sqrt') in MATLAB
-static q15_t RRC_0_2_FILTER[] = {284, 198, 73, -78, -240, -393, -517, -590, -599, -533, -391, -181, 79, 364, 643, 880, 1041, 1097,
-                                 1026, 819, 483, 39, -477, -1016, -1516, -1915, -2150, -2164, -1914, -1375, -545, 557, 1886, 3376,
-                                 4946, 6502, 7946, 9184, 10134, 10731, 10935, 10731, 10134, 9184, 7946, 6502, 4946, 3376, 1886, 557,
-                                 -545, -1375, -1914, -2164, -2150, -1915, -1516, -1016, -477, 39, 483, 819, 1026, 1097, 1041, 880,
-                                 643, 364, 79, -181, -391, -533, -599, -590, -517, -393, -240, -78, 73, 198, 284, 0};
-const uint16_t RRC_0_2_FILTER_LEN = 82U;
+// Generated using rcosdesign(0.2, 8, 5, 'sqrt') in MATLAB
+static q15_t RRC_0_2_FILTER[] = {401, 104, -340, -731, -847, -553, 112, 909, 1472, 1450, 683, -675, -2144, -3040, -2706, -770, 2667, 6995,
+                                 11237, 14331, 15464, 14331, 11237, 6995, 2667, -770, -2706, -3040, -2144, -675, 683, 1450, 1472, 909, 112,
+                                 -553, -847, -731, -340, 104, 401, 0};
+const uint16_t RRC_0_2_FILTER_LEN = 42U;
 
 const q15_t SCALING_FACTOR = 18750;      // Q15(0.55)
 
@@ -43,8 +41,8 @@ const uint8_t BIT_MASK_TABLE[] = {0x80U, 0x40U, 0x20U, 0x10U, 0x08U, 0x04U, 0x02
 const uint8_t  NOAVEPTR = 99U;
 const uint16_t NOENDPTR = 9999U;
 
-CMode2RX::CMode2RX() :
-m_state(MODE2RXS_NONE),
+CMode3RX::CMode3RX() :
+m_state(MODE3RXS_NONE),
 m_rrc02Filter(),
 m_rrc02State(),
 m_bitBuffer(),
@@ -64,15 +62,15 @@ m_thresholdVal(0),
 m_countdown(0U),
 m_packet()
 {
-  ::memset(m_rrc02State, 0x00U, 110U * sizeof(q15_t));
+  ::memset(m_rrc02State, 0x00U, 70U * sizeof(q15_t));
   m_rrc02Filter.numTaps = RRC_0_2_FILTER_LEN;
   m_rrc02Filter.pState  = m_rrc02State;
   m_rrc02Filter.pCoeffs = RRC_0_2_FILTER;
 }
 
-void CMode2RX::reset()
+void CMode3RX::reset()
 {
-  m_state        = MODE2RXS_NONE;
+  m_state        = MODE3RXS_NONE;
   m_dataPtr      = 0U;
   m_bitPtr       = 0U;
   m_maxCorr      = 0;
@@ -86,7 +84,7 @@ void CMode2RX::reset()
   m_invert       = false;
 }
 
-void CMode2RX::samples(q15_t* samples, uint8_t length)
+void CMode3RX::samples(q15_t* samples, uint8_t length)
 {
   q15_t vals[RX_BLOCK_SIZE];
   ::arm_fir_fast_q15(&m_rrc02Filter, samples, vals, RX_BLOCK_SIZE);
@@ -101,13 +99,13 @@ void CMode2RX::samples(q15_t* samples, uint8_t length)
     m_buffer[m_dataPtr] = sample;
 
     switch (m_state) {
-    case MODE2RXS_HEADER:
+    case MODE3RXS_HEADER:
       processHeader(sample);
       break;
-    case MODE2RXS_PAYLOAD:
+    case MODE3RXS_PAYLOAD:
       processPayload(sample);
       break;
-    case MODE2RXS_CRC:
+    case MODE3RXS_CRC:
       processCRC(sample);
       break;
     default:
@@ -116,16 +114,16 @@ void CMode2RX::samples(q15_t* samples, uint8_t length)
     }
 
     m_dataPtr++;
-    if (m_dataPtr >= MODE2_MAX_LENGTH_SAMPLES)
+    if (m_dataPtr >= MODE3_MAX_LENGTH_SAMPLES)
       m_dataPtr = 0U;
 
     m_bitPtr++;
-    if (m_bitPtr >= MODE2_RADIO_SYMBOL_LENGTH)
+    if (m_bitPtr >= MODE3_RADIO_SYMBOL_LENGTH)
       m_bitPtr = 0U;
   }
 }
 
-void CMode2RX::processNone(q15_t sample)
+void CMode3RX::processNone(q15_t sample)
 {
   bool ret = correlateSync();
   if (ret) {
@@ -141,153 +139,140 @@ void CMode2RX::processNone(q15_t sample)
     m_countdown--;
 
   if (m_countdown == 1U) {
-    DEBUG5("Mode2RX: sync found pos/centre/threshold/invert", m_syncPtr, m_centreVal, m_thresholdVal, m_invert ? 1 : 0);
-    m_state     = MODE2RXS_HEADER;
+    DEBUG5("Mode3RX: sync found pos/centre/threshold/invert", m_syncPtr, m_centreVal, m_thresholdVal, m_invert ? 1 : 0);
+    m_state     = MODE3RXS_HEADER;
     m_countdown = 0U;
   }
 }
 
-void CMode2RX::processHeader(q15_t sample)
+void CMode3RX::processHeader(q15_t sample)
 {
   if (m_dataPtr == m_endPtr) {
     calculateLevels(m_startPtr, m_endPtr);
 
-    uint8_t frame[MODE2_HEADER_LENGTH_BYTES + MODE2_HEADER_PARITY_BYTES];
+    uint8_t frame[MODE3_HEADER_LENGTH_BYTES + MODE3_HEADER_PARITY_BYTES];
     samplesToBits(m_startPtr, m_endPtr, frame);
 
     bool ok = m_frame.processHeader(frame, m_packet);
     if (ok) {
       uint16_t length = m_frame.getPayloadLength();
       if (length > 0U) {
-        DEBUG2("Mode2RX: header is valid and has a payload", length);
+        DEBUG2("Mode3RX: header is valid and has a payload", length);
 
-        m_state = MODE2RXS_PAYLOAD;
+        m_state = MODE3RXS_PAYLOAD;
 
         length += m_frame.getPayloadParityLength();
 
         // The payload starts right after the header
         m_startPtr = m_endPtr;
 
-        m_endPtr = m_startPtr + (length * MODE2_SYMBOLS_PER_BYTE * MODE2_RADIO_SYMBOL_LENGTH);
-        if (m_endPtr >= MODE2_MAX_LENGTH_SAMPLES)
-          m_endPtr -= MODE2_MAX_LENGTH_SAMPLES;
+        m_endPtr = m_startPtr + (length * MODE3_SYMBOLS_PER_BYTE * MODE3_RADIO_SYMBOL_LENGTH);
+        if (m_endPtr >= MODE3_MAX_LENGTH_SAMPLES)
+          m_endPtr -= MODE3_MAX_LENGTH_SAMPLES;
       } else {
         bool hasCRC = m_frame.hasCRC();
         if (hasCRC) {
-          DEBUG1("Mode2RX: header is valid but no payload and has a CRC");
+          DEBUG1("Mode3RX: header is valid but no payload and has a CRC");
 
-          m_state = MODE2RXS_CRC;
+          m_state = MODE3RXS_CRC;
 
           // The CRC starts right after the header
           m_startPtr = m_endPtr;
 
-          m_endPtr = m_startPtr + MODE2_CRC_LENGTH_SAMPLES;
-          if (m_endPtr >= MODE2_MAX_LENGTH_SAMPLES)
-            m_endPtr -= MODE2_MAX_LENGTH_SAMPLES;
+          m_endPtr = m_startPtr + MODE3_CRC_LENGTH_SAMPLES;
+          if (m_endPtr >= MODE3_MAX_LENGTH_SAMPLES)
+            m_endPtr -= MODE3_MAX_LENGTH_SAMPLES;
         } else {
-          DEBUG1("Mode2RX: header is valid but no payload and no CRC");
+          DEBUG1("Mode3RX: header is valid but no payload and no CRC");
 
           length = m_frame.getHeaderLength();
           serial.writeKISSData(KISS_TYPE_DATA, m_packet, length);
 
           io.setDecode(false);
-
           reset();
         }
       }
     } else {
-      DEBUG1("Mode2RX: header is invalid");
+      DEBUG1("Mode3RX: header is invalid");
       io.setDecode(false);
       reset();
     }
   }
 }
 
-void CMode2RX::processPayload(q15_t sample)
+void CMode3RX::processPayload(q15_t sample)
 {
   if (m_dataPtr == m_endPtr) {
     calculateLevels(m_startPtr, m_endPtr);
 
-    uint8_t frame[1023U + (5U * MODE2_PAYLOAD_PARITY_BYTES)];
+    uint8_t frame[1023U + (5U * MODE3_PAYLOAD_PARITY_BYTES)];
     samplesToBits(m_startPtr, m_endPtr, frame);
 
     bool ok = m_frame.processPayload(frame, m_packet);
     if (ok) {
       bool hasCRC = m_frame.hasCRC();
       if (hasCRC) {
-        DEBUG1("Mode2RX: payload is valid and has a CRC");
+        DEBUG1("Mode3RX: payload is valid and has a CRC");
 
-        m_state = MODE2RXS_CRC;
+        m_state = MODE3RXS_CRC;
 
         // The CRC starts right after the payload
         m_startPtr = m_endPtr;
 
-        m_endPtr = m_startPtr + MODE2_CRC_LENGTH_SAMPLES;
-        if (m_endPtr >= MODE2_MAX_LENGTH_SAMPLES)
-          m_endPtr -= MODE2_MAX_LENGTH_SAMPLES;
+        m_endPtr = m_startPtr + MODE3_CRC_LENGTH_SAMPLES;
+        if (m_endPtr >= MODE3_MAX_LENGTH_SAMPLES)
+          m_endPtr -= MODE3_MAX_LENGTH_SAMPLES;
       } else {
-        DEBUG1("Mode2RX: payload is valid but no CRC");
+        DEBUG1("Mode3RX: payload is valid but no CRC");
 
         uint16_t length = m_frame.getHeaderLength() + m_frame.getPayloadLength();
         serial.writeKISSData(KISS_TYPE_DATA, m_packet, length);
-
         io.setDecode(false);
-
         reset();
       }
     } else {
-      DEBUG1("Mode2RX: payload is invalid");
+      DEBUG1("Mode3RX: payload is invalid");
       io.setDecode(false);
       reset();
     }
   }
 }
 
-void CMode2RX::processCRC(q15_t sample)
+void CMode3RX::processCRC(q15_t sample)
 {
   if (m_dataPtr == m_endPtr) {
-    uint8_t crc[MODE2_CRC_LENGTH_BYTES];
+    uint8_t crc[MODE3_CRC_LENGTH_BYTES];
     samplesToBits(m_startPtr, m_endPtr, crc);
 
     bool ok = m_frame.checkCRC(m_packet, crc);
-    if (ok)
-      DEBUG1("Mode2RX: frame CRC is valid");
-    else
-      DEBUG1("Mode2RX: frame CRC is invalid");
-
-    uint16_t length = m_frame.getHeaderLength() + m_frame.getPayloadLength();
-    serial.writeKISSData(KISS_TYPE_DATA, m_packet, length);
-
-/*
-    bool ok = m_frame.checkCRC(m_packet, crc);
     if (ok) {
-      DEBUG1("Mode2RX: frame CRC is valid");
+      DEBUG1("Mode3RX: frame CRC is valid");
 
       uint16_t length = m_frame.getHeaderLength() + m_frame.getPayloadLength();
       serial.writeKISSData(KISS_TYPE_DATA, m_packet, length);
     } else {
-      DEBUG1("Mode2RX: frame CRC is invalid");
+      DEBUG1("Mode3RX: frame CRC is invalid");
     }
-*/
+
     io.setDecode(false);
     reset();
   }
 }
 
-bool CMode2RX::correlateSync()
+bool CMode3RX::correlateSync()
 {
-  if ((countBits32((m_bitBuffer[m_bitPtr] ^  MODE2_SYNC_SYMBOLS) & MODE2_SYNC_SYMBOLS_MASK) <= MAX_SYNC_SYMBOLS_ERRS) ||
-      (countBits32((m_bitBuffer[m_bitPtr] ^ ~MODE2_SYNC_SYMBOLS) & MODE2_SYNC_SYMBOLS_MASK) <= MAX_SYNC_SYMBOLS_ERRS)) {
+  if ((countBits32((m_bitBuffer[m_bitPtr] ^  MODE3_SYNC_SYMBOLS) & MODE3_SYNC_SYMBOLS_MASK) <= MAX_SYNC_SYMBOLS_ERRS) ||
+      (countBits32((m_bitBuffer[m_bitPtr] ^ ~MODE3_SYNC_SYMBOLS) & MODE3_SYNC_SYMBOLS_MASK) <= MAX_SYNC_SYMBOLS_ERRS)) {
 
-    uint16_t ptr = m_dataPtr + MODE2_MAX_LENGTH_SAMPLES - MODE2_SYNC_LENGTH_SAMPLES;
-    if (ptr >= MODE2_MAX_LENGTH_SAMPLES)
-      ptr -= MODE2_MAX_LENGTH_SAMPLES;
+    uint16_t ptr = m_dataPtr + MODE3_MAX_LENGTH_SAMPLES - MODE3_SYNC_LENGTH_SAMPLES;
+    if (ptr >= MODE3_MAX_LENGTH_SAMPLES)
+      ptr -= MODE3_MAX_LENGTH_SAMPLES;
 
     q31_t corr = 0;
     q15_t min  =  16000;
     q15_t max  = -16000;
 
-    for (uint8_t i = 0U; i < MODE2_SYNC_LENGTH_SYMBOLS; i++) {
+    for (uint8_t i = 0U; i < MODE3_SYNC_LENGTH_SYMBOLS; i++) {
       q15_t val = m_buffer[ptr];
 
       if (val > max)
@@ -295,7 +280,7 @@ bool CMode2RX::correlateSync()
       if (val < min)
         min = val;
 
-      switch (MODE2_SYNC_SYMBOLS_VALUES[i]) {
+      switch (MODE3_SYNC_SYMBOLS_VALUES[i]) {
       case +3:
         corr -= (val + val + val);
         break;
@@ -310,9 +295,9 @@ bool CMode2RX::correlateSync()
         break;
       }
 
-      ptr += MODE2_RADIO_SYMBOL_LENGTH;
-      if (ptr >= MODE2_MAX_LENGTH_SAMPLES)
-        ptr -= MODE2_MAX_LENGTH_SAMPLES;
+      ptr += MODE3_RADIO_SYMBOL_LENGTH;
+      if (ptr >= MODE3_MAX_LENGTH_SAMPLES)
+        ptr -= MODE3_MAX_LENGTH_SAMPLES;
     }
 
     if ((corr > m_maxCorr) || (-corr > m_maxCorr)) {
@@ -325,31 +310,31 @@ bool CMode2RX::correlateSync()
 
       m_invert = (-corr > m_maxCorr);
 
-      uint16_t startPtr = m_dataPtr + MODE2_MAX_LENGTH_SAMPLES - MODE2_SYNC_LENGTH_SAMPLES + MODE2_RADIO_SYMBOL_LENGTH;
-      if (startPtr >= MODE2_MAX_LENGTH_SAMPLES)
-        startPtr -= MODE2_MAX_LENGTH_SAMPLES;
+      uint16_t startPtr = m_dataPtr + MODE3_MAX_LENGTH_SAMPLES - MODE3_SYNC_LENGTH_SAMPLES + MODE3_RADIO_SYMBOL_LENGTH;
+      if (startPtr >= MODE3_MAX_LENGTH_SAMPLES)
+        startPtr -= MODE3_MAX_LENGTH_SAMPLES;
 
       uint16_t endPtr = m_dataPtr;
 
-      uint8_t sync[MODE2_SYNC_LENGTH_BYTES];
+      uint8_t sync[MODE3_SYNC_LENGTH_BYTES];
       samplesToBits(startPtr, endPtr, sync);
 
       uint8_t errs = 0U;
-      for (uint8_t i = 0U; i < MODE2_SYNC_LENGTH_BYTES; i++)
-        errs += countBits8(sync[i] ^ MODE2_SYNC_BYTES[i]);
+      for (uint8_t i = 0U; i < MODE3_SYNC_LENGTH_BYTES; i++)
+        errs += countBits8(sync[i] ^ MODE3_SYNC_BYTES[i]);
 
       if (errs <= MAX_SYNC_BIT_ERRS) {
         m_maxCorr = m_invert ? -corr : corr;
         m_syncPtr = m_dataPtr;
 
         // The header starts right after the sync vector
-        m_startPtr = m_dataPtr + MODE2_RADIO_SYMBOL_LENGTH;
-        if (m_startPtr >= MODE2_MAX_LENGTH_SAMPLES)
-          m_startPtr -= MODE2_MAX_LENGTH_SAMPLES;
+        m_startPtr = m_dataPtr + MODE3_RADIO_SYMBOL_LENGTH;
+        if (m_startPtr >= MODE3_MAX_LENGTH_SAMPLES)
+          m_startPtr -= MODE3_MAX_LENGTH_SAMPLES;
 
-        m_endPtr = m_startPtr + MODE2_HEADER_LENGTH_SAMPLES + MODE2_HEADER_PARITY_SAMPLES;
-        if (m_endPtr >= MODE2_MAX_LENGTH_SAMPLES)
-          m_endPtr -= MODE2_MAX_LENGTH_SAMPLES;
+        m_endPtr = m_startPtr + MODE3_HEADER_LENGTH_SAMPLES + MODE3_HEADER_PARITY_SAMPLES;
+        if (m_endPtr >= MODE3_MAX_LENGTH_SAMPLES)
+          m_endPtr -= MODE3_MAX_LENGTH_SAMPLES;
 
         return true;
       }
@@ -359,7 +344,7 @@ bool CMode2RX::correlateSync()
   return false;
 }
 
-void CMode2RX::calculateLevels(uint16_t startPtr, uint16_t endPtr)
+void CMode3RX::calculateLevels(uint16_t startPtr, uint16_t endPtr)
 {
   q15_t maxPos = -16000;
   q15_t minPos =  16000;
@@ -381,9 +366,9 @@ void CMode2RX::calculateLevels(uint16_t startPtr, uint16_t endPtr)
         minNeg = sample;
     }
 
-    startPtr += MODE2_RADIO_SYMBOL_LENGTH;
-    if (startPtr >= MODE2_MAX_LENGTH_SAMPLES)
-      startPtr -= MODE2_MAX_LENGTH_SAMPLES;
+    startPtr += MODE3_RADIO_SYMBOL_LENGTH;
+    if (startPtr >= MODE3_MAX_LENGTH_SAMPLES)
+      startPtr -= MODE3_MAX_LENGTH_SAMPLES;
   }
 
   q15_t posThresh = (maxPos + minPos) >> 1;
@@ -393,7 +378,7 @@ void CMode2RX::calculateLevels(uint16_t startPtr, uint16_t endPtr)
 
   q15_t threshold = posThresh - centre;
 
-  DEBUG5("Mode2RX: pos/neg/centre/threshold", posThresh, negThresh, centre, threshold);
+  DEBUG5("Mode3RX: pos/neg/centre/threshold", posThresh, negThresh, centre, threshold);
 
   if (m_averagePtr == NOAVEPTR) {
     for (uint8_t i = 0U; i < 16U; i++) {
@@ -423,7 +408,7 @@ void CMode2RX::calculateLevels(uint16_t startPtr, uint16_t endPtr)
   m_thresholdVal >>= 4;
 }
 
-void CMode2RX::samplesToBits(uint16_t startPtr, uint16_t endPtr, uint8_t* buffer)
+void CMode3RX::samplesToBits(uint16_t startPtr, uint16_t endPtr, uint8_t* buffer)
 {
   uint16_t offset = 0U;
 
@@ -456,9 +441,9 @@ void CMode2RX::samplesToBits(uint16_t startPtr, uint16_t endPtr, uint8_t* buffer
       offset++;
     }
 
-    startPtr += MODE2_RADIO_SYMBOL_LENGTH;
-    if (startPtr >= MODE2_MAX_LENGTH_SAMPLES)
-      startPtr -= MODE2_MAX_LENGTH_SAMPLES;
+    startPtr += MODE3_RADIO_SYMBOL_LENGTH;
+    if (startPtr >= MODE3_MAX_LENGTH_SAMPLES)
+      startPtr -= MODE3_MAX_LENGTH_SAMPLES;
   }
 }
 
