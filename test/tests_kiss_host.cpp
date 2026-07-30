@@ -330,11 +330,13 @@ TF_TEST(kiss_data_with_ack_acks_only_after_transmission)
   REQUIRE_EQ(int(frames[0].size()), 3);
   CHECK_EQ(int(frames[0][0]), int(KISS_TYPE_ACK));
 
-  /* The token goes back least significant byte first, the reverse of the
-     order it arrived in. That is what the firmware has always done, so it is
-     pinned down here as the contract the host has to live with. */
-  const uint16_t token = uint16_t(frames[0][1]) | (uint16_t(frames[0][2]) << 8);
-  CHECK_EQ(int(token), 0x1234);
+  /* The ack must carry back exactly the bytes the host sent. BPQ's ACKMODE
+     puts the ackword on the wire low byte first in both directions (kiss.c:
+     ENCBUFF[2] = ACKWORD & 0xff on send, RXMSG[1] | RXMSG[2] << 8 on
+     receive) and silently drops an ack that matches no outstanding frame, so
+     a byte swap here loses every ack. */
+  CHECK_EQ(int(frames[0][1]), 0x12);
+  CHECK_EQ(int(frames[0][2]), 0x34);
 }
 
 TF_TEST(kiss_oversized_frame_is_dropped_and_the_parser_recovers)
