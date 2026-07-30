@@ -417,11 +417,12 @@ void CMode2RX::samplesToBits(uint16_t startPtr, uint16_t endPtr, uint8_t* buffer
   uint16_t offset = 0U;
 
   while (startPtr != endPtr) {
-    q15_t sample = 0;
+    // Remove the offset first, then flip. m_centreVal was measured from the
+    // buffer as it stands, so negating before subtracting would add the
+    // offset back on instead of taking it off.
+    q15_t sample = m_buffer[startPtr] - m_centreVal;
     if (m_invert)
-      sample = -m_buffer[startPtr] - m_centreVal;
-    else
-      sample = m_buffer[startPtr] - m_centreVal;
+      sample = -sample;
 
     if (sample < -m_thresholdVal) {
       WRITE_BIT1(buffer, offset, false);
