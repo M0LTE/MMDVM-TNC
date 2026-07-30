@@ -1,5 +1,7 @@
 This is the source code of the MMDVM-TNC firmware that supports standard 1200 bps AFSK AX.25 and 9600 bps C4FSK IL2P in a 12.5 kHz bandwidth. The 9600 bps mode uses the same on-air waveform as DMR, but is incompatible with it in every sense. One big difference is that there is no correct way in which the deviation is decoded and so the receive side is able to detect and decode transmissions of either sense. This is why there is no transmit or receive invert settings to be found anywhere.
 
+This repo is a fork of https://github.com/g4klx/MMDVM-TNC. My intention is to offer these patches back to G4KLX after validating them on hardware.
+
 Standard KISS command over the MMDVM serial port are used, the speed of which is set to 115200 baud, although this can be changed in Config.h at compile time.
 
 The KISS SET HARDWARE command has two versions that allow it to control the modem (all of these settings may also be set in Config.h at compile time).
