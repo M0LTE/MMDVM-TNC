@@ -18,7 +18,10 @@
 #include "Radio.h"
 #include "shim/TestHooks.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 
 namespace radio {
 
@@ -345,6 +348,113 @@ namespace radio {
     }
 
     return true;
+  }
+
+  std::vector<int16_t> loadWav(const char* path, unsigned& sampleRate)
+  {
+    std::vector<int16_t> out;
+    sampleRate = 0U;
+
+    std::FILE* f = std::fopen(path, "rb");
+    if (f == NULL)
+      return out;
+
+    uint8_t hdr[12];
+    if (std::fread(hdr, 1U, 12U, f) != 12U || ::memcmp(hdr, "RIFF", 4) != 0 || ::memcmp(hdr + 8, "WAVE", 4) != 0) {
+      std::fclose(f);
+      return out;
+    }
+
+    uint16_t channels = 0U;
+    uint16_t bits     = 0U;
+
+    for (;;) {
+      uint8_t ch[8];
+      if (std::fread(ch, 1U, 8U, f) != 8U)
+        break;
+
+      const uint32_t size = uint32_t(ch[4]) | (uint32_t(ch[5]) << 8) |
+                            (uint32_t(ch[6]) << 16) | (uint32_t(ch[7]) << 24);
+
+      if (::memcmp(ch, "fmt ", 4) == 0) {
+        std::vector<uint8_t> fmt(size);
+        if (std::fread(&fmt[0], 1U, size, f) != size)
+          break;
+        channels   = uint16_t(fmt[2] | (fmt[3] << 8));
+        sampleRate = uint32_t(fmt[4]) | (uint32_t(fmt[5]) << 8) |
+                     (uint32_t(fmt[6]) << 16) | (uint32_t(fmt[7]) << 24);
+        bits       = uint16_t(fmt[14] | (fmt[15] << 8));
+      } else if (::memcmp(ch, "data", 4) == 0) {
+        if (channels != 1U || bits != 16U) {
+          out.clear();
+          break;
+        }
+        out.resize(size / 2U);
+        if (std::fread(&out[0], 2U, out.size(), f) != out.size())
+          out.clear();
+        break;
+      } else {
+        std::fseek(f, long(size + (size & 1U)), SEEK_CUR);
+      }
+    }
+
+    std::fclose(f);
+
+    return out;
+  }
+
+  std::vector<int16_t> decimate(const std::vector<int16_t>& in, unsigned factor)
+  {
+    if (factor <= 1U)
+      return in;
+
+    /* A short symmetric lowpass ahead of the decimation, so anything above
+       the new Nyquist does not fold back. */
+    static const double TAPS[9] = { 0.0177, 0.0497, 0.1156, 0.1810, 0.2120,
+                                    0.1810, 0.1156, 0.0497, 0.0177 };
+
+    std::vector<int16_t> out;
+    out.reserve(in.size() / factor + 1U);
+
+    for (size_t i = 0U; i < in.size(); i += factor) {
+      double acc = 0.0;
+
+      for (int k = -4; k <= 4; k++) {
+        const long j = long(i) + k;
+        const double s = (j < 0 || j >= long(in.size())) ? 0.0 : double(in[size_t(j)]);
+        acc += s * TAPS[k + 4];
+      }
+
+      if (acc >  32767.0) acc =  32767.0;
+      if (acc < -32768.0) acc = -32768.0;
+
+      out.push_back(int16_t(acc));
+    }
+
+    return out;
+  }
+
+  std::vector<uint16_t> toAdc(const std::vector<int16_t>& in, int peakCounts)
+  {
+    std::vector<uint16_t> out;
+    out.reserve(in.size());
+
+    int peak = 1;
+    for (size_t i = 0U; i < in.size(); i++)
+      peak = std::max(peak, std::abs(int(in[i])));
+
+    const double scale = double(peakCounts) / double(peak);
+
+    for (size_t i = 0U; i < in.size(); i++) {
+      int s = int(MID) + int(std::floor(double(in[i]) * scale + 0.5));
+
+      if (s < 0)    s = 0;
+      if (s > 4095) s = 4095;
+
+      out.push_back(uint16_t(s));
+    }
+
+    return out;
   }
 
 }
