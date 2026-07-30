@@ -24,7 +24,14 @@
 #include "Utils.h"
 
 // LPF, cutoff = 0.9 * 4800 (4320)
+//
+// 45 designed taps with a leading zero, because arm_fir_fast_q15 needs an
+// even tap count. CMSIS applies the coefficients against the state buffer
+// oldest first, so a zero on the front contributes nothing and shifts
+// nothing: the filter is identical to the 45 tap version, with no added
+// delay and the same response.
 static q15_t RX_FILTER[] = {  \
+      0, \
       -9, -41, -30, 32, 89, \
       44, -107, -193, -33, 279, \
       349, -64, -602, -532, 352, \
@@ -34,7 +41,19 @@ static q15_t RX_FILTER[] = {  \
       352, -532, -602, -64, 349, \
       279, -33, -193, -107, 44, \
       89, 32, -30, -41, -9 };
-const uint16_t RX_FILTER_LEN = 45U;
+const uint16_t RX_FILTER_LEN = 46U;
+
+// arm_fir_init_q15: "numTaps must be even and greater than or equal to 4".
+// This firmware fills the filter instance by hand, so nothing checks it at
+// run time. Both of these have been wrong here before: the coefficient array
+// grew from 42 to 45 entries in c07eb99 while the length stayed at 42, and
+// the length was then corrected to the odd value 45 in 55a4727.
+static_assert((sizeof(RX_FILTER) / sizeof(RX_FILTER[0])) == RX_FILTER_LEN,
+              "RX_FILTER_LEN does not match the number of coefficients");
+static_assert((RX_FILTER_LEN % 2U) == 0U,
+              "arm_fir_fast_q15 requires an even tap count");
+static_assert(RX_FILTER_LEN >= 4U,
+              "arm_fir_fast_q15 requires at least 4 taps");
 
 const q15_t SCALING_FACTOR = 21845;      // Q15(0.667)
 
