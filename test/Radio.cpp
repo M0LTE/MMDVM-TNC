@@ -189,30 +189,38 @@ namespace radio {
     return preambleBytes * 4U;
   }
 
-  std::vector<uint16_t> modulate(const uint8_t* payload, uint16_t length, uint8_t txDelay)
+  std::vector<uint16_t> modulate(const uint8_t* payload, uint16_t length, uint8_t txDelay, uint8_t mode)
   {
-    m_mode   = 2U;
+    m_mode   = mode;
     m_duplex = true;              /* io.canTX() unconditionally true */
     m_tx     = false;
 
-    mode2TX.setTXDelay(txDelay);
-
     hooks::g_dacOut.clear();
 
-    const uint8_t rc = mode2TX.writeData(payload, length);
+    uint8_t rc;
+    if (mode == 3U) {
+      mode3TX.setTXDelay(txDelay);
+      rc = mode3TX.writeData(payload, length);
+    } else {
+      mode2TX.setTXDelay(txDelay);
+      rc = mode2TX.writeData(payload, length);
+    }
     if (rc != 0U)
       return std::vector<uint16_t>();
 
     /* Run the transmitter until the DAC has been quiet for a good while. The
        trailing silence is the TX tail, which the firmware emits itself. */
-    const unsigned MAX_TICKS  = 24000U * 6U;
+    const unsigned MAX_TICKS  = (mode == 3U ? 48000U : 24000U) * 6U;
     const unsigned QUIET_STOP = 2400U;
 
     unsigned quiet = 0U;
     bool     seen  = false;
 
     for (unsigned t = 0U; t < MAX_TICKS && quiet < QUIET_STOP; t++) {
-      mode2TX.process();
+      if (mode == 3U)
+        mode3TX.process();
+      else
+        mode2TX.process();
       io.interrupt();
 
       const uint16_t s = hooks::g_dacOut.back();
@@ -290,13 +298,15 @@ namespace radio {
     dst.insert(dst.end(), src.begin(), src.end());
   }
 
-  std::vector<std::vector<uint8_t> > demodulate(const std::vector<uint16_t>& adc, bool resetReceiver)
+  std::vector<std::vector<uint8_t> > demodulate(const std::vector<uint16_t>& adc, bool resetReceiver, uint8_t mode)
   {
-    m_mode = 2U;
+    m_mode = mode;
     m_tx   = false;
 
-    if (resetReceiver)
+    if (resetReceiver) {
       mode2RX.reset();
+      mode3RX.reset();
+    }
 
     hooks::g_kissTx.clear();
     hooks::g_debugTx.clear();

@@ -42,10 +42,17 @@
 #include "AX25TX.h"
 #include "Mode2RX.h"
 #include "Mode2TX.h"
+#include "Mode3RX.h"
+#include "Mode3TX.h"
 #include "Debug.h"
 #include "IO.h"
 
 const uint16_t RX_BLOCK_SIZE = 2U;
+
+// Modes 1 and 2 run the modem at 24 kHz; mode 3 doubles the symbol rate and
+// runs at 48 kHz. The sample clock follows the mode.
+const uint32_t SAMPLE_RATE_LOW  = 24000U;
+const uint32_t SAMPLE_RATE_HIGH = 48000U;
 
 const uint16_t TX_RINGBUFFER_SIZE = 1000U;
 const uint16_t RX_RINGBUFFER_SIZE = 2432U;
@@ -65,6 +72,9 @@ extern CAX25TX ax25TX;
 
 extern CMode2TX mode2TX;
 extern CMode2RX mode2RX;
+
+extern CMode3TX mode3TX;
+extern CMode3RX mode3RX;
 
 #endif
 

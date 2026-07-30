@@ -38,6 +38,7 @@ namespace hooks {
   std::vector<uint16_t> g_adcIn;
   size_t                g_adcInPtr  = 0U;
   unsigned long         g_ticks     = 0UL;
+  uint32_t              g_sampleRate = 24000U;
   bool                  g_ptt       = false;
   bool                  g_dcd       = false;
 
@@ -108,6 +109,11 @@ static const uint16_t STUB_DC_OFFSET = 2048U;
 
 void CIO::initInt()
 {
+}
+
+void CIO::setSampleRateInt(uint32_t hz)
+{
+  hooks::g_sampleRate = hz;
 }
 
 void CIO::startInt()

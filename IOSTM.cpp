@@ -29,7 +29,7 @@
 
 const uint16_t DC_OFFSET = 2048U;
 
-// Sampling frequency
+// Initial sampling frequency; the mode can change it, see setSampleRateInt.
 #define SAMP_FREQ   24000
 
 extern "C" {
@@ -179,7 +179,8 @@ void CIO::startInt()
    TIM_TimeBaseInitTypeDef timerInitStructure;
    TIM_TimeBaseStructInit (&timerInitStructure);
 
-   // TIM2 output frequency
+   // TIM2 output frequency. The prescaler is a function of the sample rate so
+   // that setSampleRateInt() can retune it when the mode changes.
 #if defined(EXTERNAL_OSC) && !(defined(STM32F4_PI) || defined(STM32F722_PI))
    timerInitStructure.TIM_Prescaler = (uint16_t) ((EXTERNAL_OSC/(2*SAMP_FREQ)) - 1);
    timerInitStructure.TIM_Period = 1;
@@ -215,6 +216,19 @@ void CIO::startInt()
 
    GPIO_ResetBits(PORT_COSLED, PIN_COSLED);
    GPIO_SetBits(PORT_LED, PIN_LED);
+}
+
+// Retune TIM2 for a new sample rate. Called from the main loop when the mode
+// changes, never from interrupt context. The counter keeps running; only the
+// prescaler changes, and it is preloaded so it takes effect at the next
+// update event rather than mid-count.
+void CIO::setSampleRateInt(uint32_t hz)
+{
+#if defined(EXTERNAL_OSC) && !(defined(STM32F4_PI) || defined(STM32F722_PI))
+   TIM_PrescalerConfig(TIM2, (uint16_t) ((EXTERNAL_OSC/(2*hz)) - 1), TIM_PSCReloadMode_Update);
+#else
+   TIM_PrescalerConfig(TIM2, (uint16_t) ((SystemCoreClock/(6*hz)) - 1), TIM_PSCReloadMode_Update);
+#endif
 }
 
 void CIO::interrupt()

@@ -94,10 +94,11 @@ namespace radio {
   /* Where the sync vector's symbols sit within bytesToSymbols(onAirBytes()). */
   unsigned syncSymbolOffset(unsigned preambleBytes = 36U);
 
-  /* Build the on-air waveform for one packet. txDelay is in units of 12 bytes
-     of preamble, matching the KISS TX Delay parameter; the default keeps the
-     tests short while leaving the receive filter plenty of time to settle. */
-  std::vector<uint16_t> modulate(const uint8_t* payload, uint16_t length, uint8_t txDelay = 3U);
+  /* Build the on-air waveform for one packet. txDelay is in units of 10 ms of
+     preamble, matching the KISS TX Delay parameter; the default keeps the
+     tests short while leaving the receive filter plenty of time to settle.
+     mode selects the transmitter: 2 gives 24 kHz samples, 3 gives 48 kHz. */
+  std::vector<uint16_t> modulate(const uint8_t* payload, uint16_t length, uint8_t txDelay = 3U, uint8_t mode = 2U);
 
   std::vector<uint16_t> applyChannel(const std::vector<uint16_t>& in, const Channel& ch);
 
@@ -110,7 +111,7 @@ namespace radio {
      resetReceiver false leaves mode2RX exactly as the constructor left it,
      which is what a freshly powered modem sees for its first ever packet. */
   std::vector<std::vector<uint8_t> > demodulate(const std::vector<uint16_t>& adc,
-                                                bool resetReceiver = true);
+                                                bool resetReceiver = true, uint8_t mode = 2U);
 
   /* modulate -> channel -> demodulate, for the common case. */
   std::vector<std::vector<uint8_t> > loopback(const std::vector<uint8_t>& payload, const Channel& ch);

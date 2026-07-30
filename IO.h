@@ -60,7 +60,9 @@ private:
 
   q15_t                  m_rxLevel;
   uint8_t                m_pPersist;
+  uint32_t               m_slotTime10ms;
   uint32_t               m_slotTime;
+  uint32_t               m_sampleRate;
 
   bool                   m_dcd;
 
@@ -80,6 +82,8 @@ private:
   // Hardware specific routines
   void initInt();
   void startInt();
+
+  void setSampleRateInt(uint32_t hz);
 
   void setLEDInt(bool on);
   void setPTTInt(bool on);
