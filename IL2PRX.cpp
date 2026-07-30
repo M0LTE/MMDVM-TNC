@@ -346,29 +346,39 @@ void CIL2PRX::processType1Header(const uint8_t* in, uint8_t* out)
         out[14U] = 0x0DU;
         break;
     }
+    out[14U] |= (control & 0x40U) == 0x40U ? 0x10U : 0x00U;	// P/F
     out[14U] |= (control & 0x20U) == 0x20U ? 0x80U : 0x00U;
-    out[14U] |= (control & 0x20U) == 0x10U ? 0x40U : 0x00U;
-    out[14U] |= (control & 0x20U) == 0x08U ? 0x20U : 0x00U;
+    out[14U] |= (control & 0x10U) == 0x10U ? 0x40U : 0x00U;
+    out[14U] |= (control & 0x08U) == 0x08U ? 0x20U : 0x00U;
     out[6U]  |= (control & 0x04U) == 0x04U ? 0x80U : 0x00U;
+    out[13U] |= (control & 0x04U) == 0x00U ? 0x80U : 0x00U;
   } else if (pid == 0x01U) {
     // U frame except for UI
     switch (control & 0x38U) {
       case 0x00U:		// SABM
-        out[14U] = 0x3FU;
-        out[6U] |= 0x80U;	// Command
+        out[14U]  = 0x2FU;
+        out[14U] |= (control & 0x40U) == 0x40U ? 0x10U : 0x00U;	// P/F
+        out[6U]  |= 0x80U;	// Command
         break;
       case 0x08U:		// DISC
-        out[14U] = 0x53U;
-        out[6U] |= 0x80U;	// Command
+        out[14U]  = 0x43U;
+        out[14U] |= (control & 0x40U) == 0x40U ? 0x10U : 0x00U;	// P/F
+        out[6U]  |= 0x80U;	// Command
         break;
       case 0x10U:		// DM
-        out[14U]  = 0x1FU;
+        out[14U]  = 0x0FU;
+        out[14U] |= (control & 0x40U) == 0x40U ? 0x10U : 0x00U;	// P/F
+        out[13U] |= 0x80U;	// Response
         break;
       case 0x18U:		// UA
-        out[14U]  = 0x73U;
+        out[14U]  = 0x63U;
+        out[14U] |= (control & 0x40U) == 0x40U ? 0x10U : 0x00U;	// P/F
+        out[13U] |= 0x80U;	// Response
         break;
       case 0x20U:		// FRMR
-        out[14U]  = 0x97U;
+        out[14U]  = 0x87U;
+        out[14U] |= (control & 0x40U) == 0x40U ? 0x10U : 0x00U;	// P/F
+        out[13U] |= 0x80U;	// Response
         hasData   = true;
         break;
       case 0x30U:		// XID
@@ -404,8 +414,7 @@ void CIL2PRX::processType1Header(const uint8_t* in, uint8_t* out)
       out[14U] |= (control & 0x04U) == 0x04U ? 0x08U : 0x00U;
       out[14U] |= (control & 0x02U) == 0x02U ? 0x04U : 0x00U;
       out[14U] |= (control & 0x01U) == 0x01U ? 0x02U : 0x00U;
-      out[6U]  |= (control & 0x04U) == 0x04U ? 0x80U : 0x00U;
-      out[13U] |= (control & 0x04U) == 0x00U ? 0x80U : 0x00U;
+      out[6U]  |= 0x80U;	// I frames are always commands
       hasPID  = true;
       hasData = true;
   }

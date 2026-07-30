@@ -1,6 +1,6 @@
 # Host test harness
 
-Builds the portable firmware sources for the host and exercises them without a Nucleo on the desk.
+Builds the portable firmware sources for the host and exercises them without a Nucleo on the desk. (`fuzz/` holds the companion libFuzzer harness; see its own README.)
 
 ```
 make            # build and run everything

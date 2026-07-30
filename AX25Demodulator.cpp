@@ -85,7 +85,12 @@ m_hdlcBuffer(0U),
 m_hdlcBits(0U),
 m_hdlcState(AX25_IDLE)
 {
+  // The delay line is read before it has been written right around, so it
+  // has to start defined or the first bits out of the discriminator depend
+  // on heap garbage.
   m_delayLine = new bool[DELAY_LEN];
+  for (uint16_t i = 0U; i < DELAY_LEN; i++)
+    m_delayLine[i] = false;
 
   m_lpfFilter.numTaps = LPF_FILTER_LEN;
   m_lpfFilter.pState  = m_lpfState;
@@ -97,6 +102,11 @@ m_hdlcState(AX25_IDLE)
 
   for (uint8_t i = 0U; i < PLL_IIR_SIZE; i++)
     m_iirHistory[i] = 0.0F;
+}
+
+CAX25Demodulator::~CAX25Demodulator()
+{
+  delete[] m_delayLine;
 }
 
 bool CAX25Demodulator::process(q15_t* samples, uint8_t length, CAX25Frame& frame)

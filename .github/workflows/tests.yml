@@ -18,3 +18,15 @@ jobs:
 
       - name: Re-run under the sanitisers
         run: make -C test clean && make -C test SAN=1
+
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Build the fuzzers and generate the seed corpora
+        run: make -C test/fuzz
+
+      - name: Fuzz each target briefly
+        run: make -C test/fuzz run TIME=30

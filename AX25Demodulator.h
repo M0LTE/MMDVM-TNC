@@ -33,6 +33,7 @@ enum AX25_STATE {
 class CAX25Demodulator {
 public:
   CAX25Demodulator(int8_t n);
+  ~CAX25Demodulator();
 
   bool process(q15_t* samples, uint8_t length, CAX25Frame& frame);
 
