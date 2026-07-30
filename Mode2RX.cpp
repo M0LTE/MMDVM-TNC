@@ -370,24 +370,33 @@ bool CMode2RX::correlateSync()
 
 void CMode2RX::calculateLevels(uint16_t startPtr, uint16_t endPtr)
 {
-  q15_t maxPos = -16000;
-  q15_t minPos =  16000;
-  q15_t maxNeg =  16000;
-  q15_t minNeg = -16000;
+  // Estimate the two positive levels separately and put the decision point
+  // midway between them, and likewise for the negative pair.
+  //
+  // First pass: the mean of each polarity, used only as a split. Second pass:
+  // the mean of the samples either side of that split, which are the +3 and
+  // +1 cluster centres. The midpoint of two cluster means barely moves when
+  // one sample lands near zero, whereas a midpoint taken from the largest and
+  // smallest sample moves a long way. Across the 464 symbols of a payload
+  // block that happens often enough to drag the threshold down and misread +1
+  // symbols as +3 for the rest of the block, which is why the payload failed
+  // so much more often than the 60 symbol header.
+  const uint16_t start = startPtr;
+
+  q31_t    posSum   = 0;
+  q31_t    negSum   = 0;
+  uint16_t posCount = 0U;
+  uint16_t negCount = 0U;
 
   while (startPtr != endPtr) {
     q15_t sample = m_buffer[startPtr];
 
     if (sample > 0) {
-      if (sample > maxPos)
-        maxPos = sample;
-      if (sample < minPos)
-        minPos = sample;
+      posSum += sample;
+      posCount++;
     } else {
-      if (sample < maxNeg)
-        maxNeg = sample;
-      if (sample > minNeg)
-        minNeg = sample;
+      negSum += sample;
+      negCount++;
     }
 
     startPtr += MODE2_RADIO_SYMBOL_LENGTH;
@@ -395,8 +404,36 @@ void CMode2RX::calculateLevels(uint16_t startPtr, uint16_t endPtr)
       startPtr -= MODE2_MAX_LENGTH_SAMPLES;
   }
 
-  q15_t posThresh = (maxPos + minPos) / 2;
-  q15_t negThresh = (maxNeg + minNeg) / 2;
+  const q15_t posSplit = posCount > 0U ? q15_t(posSum / posCount) : 0;
+  const q15_t negSplit = negCount > 0U ? q15_t(negSum / negCount) : 0;
+
+  q31_t    hiPosSum = 0, loPosSum = 0, hiNegSum = 0, loNegSum = 0;
+  uint16_t hiPosCnt = 0U, loPosCnt = 0U, hiNegCnt = 0U, loNegCnt = 0U;
+
+  startPtr = start;
+  while (startPtr != endPtr) {
+    q15_t sample = m_buffer[startPtr];
+
+    if (sample > 0) {
+      if (sample >= posSplit) { hiPosSum += sample; hiPosCnt++; }
+      else                    { loPosSum += sample; loPosCnt++; }
+    } else {
+      if (sample <= negSplit) { hiNegSum += sample; hiNegCnt++; }
+      else                    { loNegSum += sample; loNegCnt++; }
+    }
+
+    startPtr += MODE2_RADIO_SYMBOL_LENGTH;
+    if (startPtr >= MODE2_MAX_LENGTH_SAMPLES)
+      startPtr -= MODE2_MAX_LENGTH_SAMPLES;
+  }
+
+  q15_t posThresh = posSplit;
+  if (hiPosCnt > 0U && loPosCnt > 0U)
+    posThresh = q15_t((hiPosSum / hiPosCnt + loPosSum / loPosCnt) / 2);
+
+  q15_t negThresh = negSplit;
+  if (hiNegCnt > 0U && loNegCnt > 0U)
+    negThresh = q15_t((hiNegSum / hiNegCnt + loNegSum / loNegCnt) / 2);
 
   q15_t centre = (posThresh + negThresh) / 2;
 
