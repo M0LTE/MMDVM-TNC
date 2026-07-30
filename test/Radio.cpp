@@ -249,6 +249,8 @@ namespace radio {
     for (unsigned i = 0U; i < ch.phase; i++)
       out.push_back(MID);
 
+    uint32_t rnd = ch.seed * 2654435761U + 1U;
+
     for (size_t i = 0U; i < in.size(); i++) {
       double v = double(int(in[i]) - int(MID));
 
@@ -258,6 +260,11 @@ namespace radio {
       v *= ch.gain;
 
       int s = int(std::floor(double(MID) + v + 0.5)) + ch.dcOffset;
+
+      if (ch.noise > 0U) {
+        rnd = rnd * 1103515245U + 12345U;
+        s += int((rnd >> 16) % (2U * ch.noise + 1U)) - int(ch.noise);
+      }
 
       if (s < 0)
         s = 0;
