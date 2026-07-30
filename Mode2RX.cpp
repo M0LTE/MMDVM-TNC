@@ -257,7 +257,10 @@ bool CMode2RX::correlateSync()
   uint8_t n2 = countBits16(m_bitBuffer[m_bitPtr] ^ ~MODE2_SYNC_SYMBOLS);
 
   if ((n1 <= MAX_SYNC_SYMBOLS_ERRS) || (n2 <= MAX_SYNC_SYMBOLS_ERRS)) {
-    uint16_t ptr = m_dataPtr + MODE2_MAX_LENGTH_SAMPLES - MODE2_SYNC_LENGTH_SAMPLES;
+    // The sign of the sample at m_dataPtr is shifted into the bit buffer
+    // before we get here, so a match puts the last sync symbol at m_dataPtr
+    // and the first at m_dataPtr - (MODE2_SYNC_LENGTH_SAMPLES - one symbol).
+    uint16_t ptr = m_dataPtr + MODE2_MAX_LENGTH_SAMPLES - MODE2_SYNC_LENGTH_SAMPLES + MODE2_RADIO_SYMBOL_LENGTH;
     if (ptr >= MODE2_MAX_LENGTH_SAMPLES)
       ptr -= MODE2_MAX_LENGTH_SAMPLES;
 
