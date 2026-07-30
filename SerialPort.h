@@ -38,12 +38,14 @@ public:
   void writeKISSData(uint8_t type, const uint8_t* data, uint16_t length);
   void writeKISSAck(uint16_t token);
 
+  // int32_t rather than int16_t: several callers pass a q31_t, which a 16 bit
+  // parameter silently wraps.
   void writeDebug(const char* text);
-  void writeDebug(const char* text, int16_t n1);
-  void writeDebug(const char* text, int16_t n1, int16_t n2);
-  void writeDebug(const char* text, int16_t n1, int16_t n2, int16_t n3);
-  void writeDebug(const char* text, int16_t n1, int16_t n2, int16_t n3, int16_t n4);
-  void writeDebug(const char* text, int16_t n1, int16_t n2, int16_t n3, int16_t n4, int16_t n5);
+  void writeDebug(const char* text, int32_t n1);
+  void writeDebug(const char* text, int32_t n1, int32_t n2);
+  void writeDebug(const char* text, int32_t n1, int32_t n2, int32_t n3);
+  void writeDebug(const char* text, int32_t n1, int32_t n2, int32_t n3, int32_t n4);
+  void writeDebug(const char* text, int32_t n1, int32_t n2, int32_t n3, int32_t n4, int32_t n5);
 
 private:
   uint8_t  m_buffer[2000U];
@@ -55,7 +57,7 @@ private:
 
 #if defined(SERIAL_DEBUGGING)
   void writeDebugInt(const char* text);
-  void writeDebugInt(int16_t num);
+  void writeDebugInt(int32_t num);
   void reverse(char* buffer, uint8_t length) const;
 #endif
 

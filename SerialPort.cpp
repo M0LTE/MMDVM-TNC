@@ -247,7 +247,7 @@ void CSerialPort::writeDebug(const char* text)
 #endif
 }
 
-void CSerialPort::writeDebug(const char* text, int16_t n1)
+void CSerialPort::writeDebug(const char* text, int32_t n1)
 {
 #if defined(SERIAL_DEBUGGING)
   writeDebugInt(text);
@@ -257,7 +257,7 @@ void CSerialPort::writeDebug(const char* text, int16_t n1)
 #endif
 }
 
-void CSerialPort::writeDebug(const char* text, int16_t n1, int16_t n2)
+void CSerialPort::writeDebug(const char* text, int32_t n1, int32_t n2)
 {
 #if defined(SERIAL_DEBUGGING)
   writeDebugInt(text);
@@ -269,7 +269,7 @@ void CSerialPort::writeDebug(const char* text, int16_t n1, int16_t n2)
 #endif
 }
 
-void CSerialPort::writeDebug(const char* text, int16_t n1, int16_t n2, int16_t n3)
+void CSerialPort::writeDebug(const char* text, int32_t n1, int32_t n2, int32_t n3)
 {
 #if defined(SERIAL_DEBUGGING)
   writeDebugInt(text);
@@ -283,7 +283,7 @@ void CSerialPort::writeDebug(const char* text, int16_t n1, int16_t n2, int16_t n
 #endif
 }
 
-void CSerialPort::writeDebug(const char* text, int16_t n1, int16_t n2, int16_t n3, int16_t n4)
+void CSerialPort::writeDebug(const char* text, int32_t n1, int32_t n2, int32_t n3, int32_t n4)
 {
 #if defined(SERIAL_DEBUGGING)
   writeDebugInt(text);
@@ -299,7 +299,7 @@ void CSerialPort::writeDebug(const char* text, int16_t n1, int16_t n2, int16_t n
 #endif
 }
 
-void CSerialPort::writeDebug(const char* text, int16_t n1, int16_t n2, int16_t n3, int16_t n4, int16_t n5)
+void CSerialPort::writeDebug(const char* text, int32_t n1, int32_t n2, int32_t n3, int32_t n4, int32_t n5)
 {
 #if defined(SERIAL_DEBUGGING)
   writeDebugInt(text);
@@ -323,31 +323,31 @@ void CSerialPort::writeDebugInt(const char* text)
   writeInt(3U, (uint8_t*)text, ::strlen(text));
 }
 
-void CSerialPort::writeDebugInt(int16_t num)
+void CSerialPort::writeDebugInt(int32_t num)
 {
-  if (num == 0) {
-    writeDebug("0");
-    return;
-  }
+  // Zero used to be special cased here as writeDebug("0"), which is the
+  // public overload that terminates the line. Everything after it on the same
+  // DEBUGn() call then landed on lines of its own.
+  const bool isNegative = num < 0;
 
-  bool isNegative = false;
+  // Negate through an unsigned type so the most negative value does not
+  // overflow.
+  uint32_t value = isNegative ? (uint32_t(-(num + 1)) + 1U) : uint32_t(num);
 
-  if (num < 0) {
-    isNegative = true;
-    num = -num;
-  }
-
-  char buffer[10U];
+  char    buffer[12U];      // -2147483648 plus the terminator
   uint8_t pos = 0U;
 
-  while (num != 0) {
-    int16_t rem = num % 10;
-    buffer[pos++] = rem + '0';
-    num /= 10;
-  }
+  if (value == 0U) {
+    buffer[pos++] = '0';
+  } else {
+    while (value != 0U) {
+      buffer[pos++] = char('0' + (value % 10U));
+      value /= 10U;
+    }
 
-  if (isNegative)
-    buffer[pos++] = '-';
+    if (isNegative)
+      buffer[pos++] = '-';
+  }
 
   buffer[pos] = '\0';
 
