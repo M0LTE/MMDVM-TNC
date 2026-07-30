@@ -36,7 +36,10 @@ public:
   void setLevel(uint8_t value);
 
 private:
-  uint8_t    m_poBuffer[600U];
+  // Bits, not bytes. Worst case is 255 * 12 bits of TX delay preamble, two
+  // flags, and a maximum length frame with worst case bit stuffing:
+  // 3060 + 16 + 2400 + 480 = 5956 bits, so 745 bytes.
+  uint8_t    m_poBuffer[800U];
   uint16_t   m_poLen;
   uint16_t   m_poPtr;
   uint16_t   m_tablePtr;

@@ -1,6 +1,6 @@
 # Host test harness
 
-Builds the portable firmware sources for the host and exercises them without a Nucleo on the desk.
+Builds the portable firmware sources for the host and exercises them without a Nucleo on the desk. (`fuzz/` holds the companion libFuzzer harness; see its own README.)
 
 ```
 make            # build and run everything
@@ -44,7 +44,9 @@ Samples move through the real ring buffers at the real block size, so the receiv
 - **invert** — the deviation sense. The README at the top of this repo says the receiver detects and decodes either sense, so both must work.
 - **gain** and **dcOffset** — receive level and residual DC on the ADC input.
 
-`radio::modulate()` drives the real `CMode2TX`. `radio::modulateSymbols()` is a deliberate second implementation of the wire format, so a test can transmit something the firmware never would — a sync vector with a known number of bit errors, for instance. `baseline_reference_modulator_produces_a_matching_burst` keeps the two honest with each other.
+`radio::modulate()` drives the real transmitter for the chosen mode — `CAX25TX` for mode 1, `CMode2TX` for mode 2, `CMode3TX` for mode 3. `radio::modulateSymbols()` is a deliberate second implementation of the mode 2 wire format, so a test can transmit something the firmware never would — a sync vector with a known number of bit errors, for instance. `baseline_reference_modulator_produces_a_matching_burst` keeps the two honest with each other.
+
+The host side of the TNC is virtual too: queue bytes in `hooks::g_kissRx` and call `serial.process()` to play a KISS frame into the real parser, then `radio::runTX()` to pump out whatever transmission it queued. Everything the firmware sends back to the host accumulates in `hooks::g_kissTx`, with `hooks::kissFrames()` to split and unescape it.
 
 ## Fork per test
 

@@ -113,16 +113,29 @@ uint16_t CIL2PTX::process(const uint8_t* in, uint16_t inLength, uint8_t* out)
 
 bool CIL2PTX::isIL2PType1(const uint8_t* frame, uint16_t length) const
 {
+  // Too short to hold the AX.25 address block and control byte this header
+  // translates? Every test below reads those fields.
+  if (length < 15U)
+    return false;
+
   // Has any digipeaters?
   if ((frame[13U] & 0x01U) == 0x00U)
     return false;
 
-  // Has SAMBME?
-  if ((length == 15U) && ((frame[14U] & 0xEFU) == 0x6FU))
-    return false;
+  // A well formed two address block: the end-of-address marker must appear
+  // at the source SSID byte and nowhere before it. The header has no way to
+  // carry a stray marker.
+  for (uint8_t i = 0U; i < 13U; i++) {
+    if ((frame[i] & 0x01U) == 0x01U)
+      return false;
+  }
 
   // Has untranslatable PID?
   if ((frame[14U] & 0x01U) == 0x00U || (frame[14U] & 0xEFU) == 0x03U) {	// I or UI frames
+    // An I or UI frame with no room for its PID byte cannot be translated
+    if (length < 16U)
+      return false;
+
     bool found = false;
 
     for (std::size_t i = 0; i < (sizeof(IL2P_PIDS) / sizeof(struct IL2P_PID)); i++) {
@@ -158,9 +171,50 @@ bool CIL2PTX::isIL2PType1(const uint8_t* frame, uint16_t length) const
   if (!s1 || !s2)
     return false;
 
-  // How do we reject (or do we want to?) extended sequence number RRs, etc?
+  // Only frames the translated header can represent exactly. The receiver
+  // rebuilds the frame from the header and judges the result against the
+  // frame's CRC, so anything that cannot round trip byte for byte -- an
+  // unknown U opcode, information bytes the header has nowhere to put, a
+  // command/response sense the rebuild has to assume -- would be thrown
+  // away at the far end. Type 0 carries all of those verbatim instead.
+  const bool command = (frame[6U] & 0x80U) == 0x80U;
 
-  return true;  
+  const uint8_t control = frame[14U];
+  if ((control & 0x01U) == 0x00U) {
+    // I frame, always a command
+    if (!command)
+      return false;
+  } else if ((control & 0x03U) == 0x01U) {
+    // S frame: the header has no room for information bytes
+    if (length != 15U)
+      return false;
+  } else {
+    // U frame
+    switch (control & 0xEFU) {
+      case 0x2FU:      // SABM, always a command, no information
+      case 0x43U:      // DISC
+        if (!command || length != 15U)
+          return false;
+        break;
+      case 0x0FU:      // DM, always a response, no information
+      case 0x63U:      // UA
+        if (command || length != 15U)
+          return false;
+        break;
+      case 0x87U:      // FRMR, always a response
+        if (command)
+          return false;
+        break;
+      case 0x03U:      // UI
+      case 0xAFU:      // XID
+      case 0xE3U:      // TEST
+        break;
+      default:         // SABME and the rest have no translation
+        return false;
+    }
+  }
+
+  return true;
 }
 
 void CIL2PTX::processType0Header(const uint8_t* in, uint16_t length, uint8_t* out)
@@ -226,6 +280,7 @@ void CIL2PTX::processType1Header(const uint8_t* in, uint16_t length, uint8_t* ou
   } else if ((in[14U] & 0x03U) == 0x01U) {
     // S frame
     // Also a PID of 0x00 but that's default anyway
+    out[5U]  |= (in[14U] & 0x10U) == 0x10U ? 0x40U : 0x00U;	// P/F
     out[6U]  |= (in[14U] & 0x80U) == 0x80U ? 0x40U : 0x00U;
     out[7U]  |= (in[14U] & 0x40U) == 0x40U ? 0x40U : 0x00U;
     out[8U]  |= (in[14U] & 0x20U) == 0x20U ? 0x40U : 0x00U;
@@ -237,29 +292,29 @@ void CIL2PTX::processType1Header(const uint8_t* in, uint16_t length, uint8_t* ou
     switch (in[14U] & 0xEFU) {
       case 0x2FU:  // SABM
         out[4U] |= 0x40U;	// A PID of 0x01
-        out[5U] |= 0x40U;	// Poll
+        out[5U] |= (in[14U] & 0x10U) == 0x10U ? 0x40U : 0x00U;	// P/F
         out[9U] |= 0x40U;
         break;
       case 0x43U:  // DISC
         out[4U] |= 0x40U;	// A PID of 0x01
-        out[5U] |= 0x40U;	// Poll
+        out[5U] |= (in[14U] & 0x10U) == 0x10U ? 0x40U : 0x00U;	// P/F
         out[8U] |= 0x40U;
         out[9U] |= 0x40U;
         break;
       case 0x0FU:  // DM
         out[4U] |= 0x40U;	// A PID of 0x01
-        out[5U] |= 0x40U;	// Final
+        out[5U] |= (in[14U] & 0x10U) == 0x10U ? 0x40U : 0x00U;	// P/F
         out[7U] |= 0x40U;
         break;
       case 0x63U:  // UA
         out[4U] |= 0x40U;	// A PID of 0x01
-        out[5U] |= 0x40U;	// Final
+        out[5U] |= (in[14U] & 0x10U) == 0x10U ? 0x40U : 0x00U;	// P/F
         out[7U] |= 0x40U;
         out[8U] |= 0x40U;
         break;
       case 0x87U:  // FRMR
         out[4U] |= 0x40U;	// A PID of 0x01
-        out[5U] |= 0x40U;	// Final
+        out[5U] |= (in[14U] & 0x10U) == 0x10U ? 0x40U : 0x00U;	// P/F
         out[6U] |= 0x40U;
         hasData  = true;
         break;

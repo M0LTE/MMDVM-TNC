@@ -51,7 +51,10 @@ const uint8_t BIT_MASK_TABLE2[] = { 0x01U, 0x02U, 0x04U, 0x08U, 0x10U, 0x20U, 0x
 #define READ_BIT2(p,i)    (p[(i)>>3] & BIT_MASK_TABLE2[(i)&7])
 
 CMode2TX::CMode2TX() :
-m_fifo(3000U),
+// Sized for the worst case burst queued from idle: 255 * 12 bytes of
+// preamble at the longest TX delay, the sync vector, the longest encoded
+// frame and the ten byte spacer. 3060 + 4 + 1122 + 10.
+m_fifo(4200U),
 m_playOut(0U),
 m_modFilter(),
 m_modState(),
@@ -132,14 +135,29 @@ void CMode2TX::process()
 
 uint8_t CMode2TX::writeData(const uint8_t* data, uint16_t length)
 {
-  uint16_t space = m_fifo.getSpace();
-  if (space < (length + MODE2_SYNC_LENGTH_BYTES)) {
+  if (length > IL2P_MAX_PAYLOAD_LENGTH) {
+    DEBUG2("Mode2TX: payload is too long for IL2P", length);
+    return 4U;
+  }
+
+  uint8_t buffer[IL2P_MAX_ENCODED_LENGTH];
+  uint16_t len = m_frame.process(data, length, buffer);
+
+  // The preamble only goes out in front of a burst that starts from idle
+  const bool idle = !m_tx && (m_fifo.getData() == 0U);
+
+  // Everything must fit, or the FIFO would be left holding a torn frame
+  uint16_t needed = MODE2_SYNC_LENGTH_BYTES + len + 10U;
+  if (idle)
+    needed += m_txDelay;
+
+  if (m_fifo.getSpace() < needed) {
     DEBUG1("Mode2TX: no space for the packet");
     return 5U;
   }
 
   // Add the preamble symbols
-  if (!m_tx && (m_fifo.getData() == 0U)) {
+  if (idle) {
     for (uint16_t i = 0U; i < m_txDelay; i++)
       m_fifo.put(MODE2_PREAMBLE_BYTE);
   }
@@ -147,9 +165,6 @@ uint8_t CMode2TX::writeData(const uint8_t* data, uint16_t length)
   // Add the IL2P sync vector
   for (uint8_t i = 0U; i < MODE2_SYNC_LENGTH_BYTES; i++)
     m_fifo.put(MODE2_SYNC_BYTES[i]);
-
-  uint8_t buffer[2000U];
-  uint16_t len = m_frame.process(data, length, buffer);
 
   for (uint16_t i = 0U; i < len; i++)
     m_fifo.put(buffer[i]);

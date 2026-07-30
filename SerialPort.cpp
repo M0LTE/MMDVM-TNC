@@ -94,6 +94,16 @@ void CSerialPort::process()
         m_ptr       = 0U;
       }
     } else {
+      // A frame that has outgrown the buffer can only be garbage. Abandon it,
+      // and everything up to its closing FEND, rather than writing past the
+      // end of m_buffer.
+      if (m_ptr >= sizeof(m_buffer) && c != KISS_FEND) {
+        m_inFrame   = false;
+        m_isEscaped = false;
+        m_ptr       = 0U;
+        continue;
+      }
+
       // Any other bytes are added to the buffer-ish
       switch (c) {
         case KISS_TFESC:
@@ -108,9 +118,11 @@ void CSerialPort::process()
           m_isEscaped = true;
           break;
         case KISS_FEND:
+          // The end of one frame is also the start of the next: repeated
+          // FENDs collapse, so stray or flushing FENDs cannot make the
+          // parser eat the frame that follows them.
           if (m_ptr > 0U)
             processMessage();
-          m_inFrame   = false;
           m_isEscaped = false;
           m_ptr       = 0U;
           break;
@@ -199,7 +211,11 @@ void CSerialPort::processMessage()
       }
       break;
     case KISS_TYPE_DATA_WITH_ACK: {
-        uint16_t token = (m_buffer[1U] << 8) + (m_buffer[2U] << 0);
+        if (m_ptr < 3U)
+          break;
+
+        // The token travels low byte first, BPQ's ACKMODE convention
+        uint16_t token = (m_buffer[2U] << 8) + (m_buffer[1U] << 0);
         switch (m_mode) {
           case 1U:
             ax25TX.writeDataAck(token, m_buffer + 3U, m_ptr - 3U);
@@ -253,7 +269,14 @@ void CSerialPort::writeKISSData(uint8_t type, const uint8_t* data, uint16_t leng
 
 void CSerialPort::writeKISSAck(uint16_t token)
 {
-  writeKISSData(KISS_TYPE_ACK, (uint8_t*)&token, sizeof(uint16_t));
+  // Low byte first, so the host gets back exactly the bytes it sent in the
+  // DATA_WITH_ACK frame. BPQ reads the ack as RXMSG[1] | RXMSG[2] << 8 and
+  // drops it silently if it does not match an outstanding frame.
+  uint8_t data[2U];
+  data[0U] = uint8_t(token >> 0);
+  data[1U] = uint8_t(token >> 8);
+
+  writeKISSData(KISS_TYPE_ACK, data, 2U);
 }
 
 void CSerialPort::writeDebug(const char* text)

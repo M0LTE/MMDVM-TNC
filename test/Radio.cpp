@@ -191,22 +191,34 @@ namespace radio {
 
   std::vector<uint16_t> modulate(const uint8_t* payload, uint16_t length, uint8_t txDelay, uint8_t mode)
   {
+    uint8_t rc;
+    switch (mode) {
+      case 1U:
+        ax25TX.setTXDelay(txDelay);
+        rc = ax25TX.writeData(payload, length);
+        break;
+      case 3U:
+        mode3TX.setTXDelay(txDelay);
+        rc = mode3TX.writeData(payload, length);
+        break;
+      default:
+        mode2TX.setTXDelay(txDelay);
+        rc = mode2TX.writeData(payload, length);
+        break;
+    }
+    if (rc != 0U)
+      return std::vector<uint16_t>();
+
+    return runTX(mode);
+  }
+
+  std::vector<uint16_t> runTX(uint8_t mode)
+  {
     m_mode   = mode;
     m_duplex = true;              /* io.canTX() unconditionally true */
     m_tx     = false;
 
     hooks::g_dacOut.clear();
-
-    uint8_t rc;
-    if (mode == 3U) {
-      mode3TX.setTXDelay(txDelay);
-      rc = mode3TX.writeData(payload, length);
-    } else {
-      mode2TX.setTXDelay(txDelay);
-      rc = mode2TX.writeData(payload, length);
-    }
-    if (rc != 0U)
-      return std::vector<uint16_t>();
 
     /* Run the transmitter until the DAC has been quiet for a good while. The
        trailing silence is the TX tail, which the firmware emits itself. */
@@ -217,10 +229,17 @@ namespace radio {
     bool     seen  = false;
 
     for (unsigned t = 0U; t < MAX_TICKS && quiet < QUIET_STOP; t++) {
-      if (mode == 3U)
-        mode3TX.process();
-      else
-        mode2TX.process();
+      switch (mode) {
+        case 1U:
+          ax25TX.process();
+          break;
+        case 3U:
+          mode3TX.process();
+          break;
+        default:
+          mode2TX.process();
+          break;
+      }
       io.interrupt();
 
       const uint16_t s = hooks::g_dacOut.back();
@@ -244,7 +263,13 @@ namespace radio {
     if (keep < out.size())
       out.resize(keep);
 
-    /* Leave the transmitter idle for whatever runs next in this process. */
+    /* Leave the station idle for whatever runs next in this process: give
+       CIO enough process() calls to notice the DAC has drained, so it drops
+       the PTT line itself, and to chew through the mid-rail samples the pump
+       above left in the RX ring buffer. */
+    for (unsigned i = 0U; i < RX_RINGBUFFER_SIZE; i++)
+      io.process();
+
     m_tx     = false;
     m_duplex = (DUPLEX == 1);
     hooks::g_dacOut.clear();
