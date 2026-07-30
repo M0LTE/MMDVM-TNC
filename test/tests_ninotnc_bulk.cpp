@@ -98,7 +98,9 @@ TF_TEST(ninotnc_bulk_9600_decode_rate)
 
   std::printf("      decoded %u of 100 beacons\n", got);
 
-  /* Raise this as the receiver improves. The target is 100. */
-  CHECK_MSG(got >= 38U,
-            "decoded " << got << " of 100 beacons; the floor is 38 and the target is 100");
+  /* Raise this as the receiver improves. The target is 100; the two frames
+     short of it have a visibly degraded eye in the recording itself and are
+     under investigation against the reference decoder. */
+  CHECK_MSG(got >= 98U,
+            "decoded " << got << " of 100 beacons; the floor is 98 and the target is 100");
 }

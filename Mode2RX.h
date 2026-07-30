@@ -61,6 +61,10 @@ private:
   q15_t                m_thresholdVal;
   uint8_t              m_averagePtr;
   uint8_t              m_countdown;
+  uint32_t             m_trkPos;
+  int32_t              m_trkStep;
+  q15_t                m_trkCentres[4U];
+  bool                 m_trkValid;
   uint8_t              m_packet[1100U];
 
   void processNone(q15_t sample);
@@ -69,6 +73,15 @@ private:
   void processCRC(q15_t sample);
 
   bool correlateSync();
+
+  q15_t   sampleAt(uint32_t pos) const;
+  int64_t scoreCandidate(uint32_t pos0, int32_t step, uint16_t nsym, q15_t centres[4]) const;
+  void    sliceSymbols(uint32_t pos0, int32_t step, uint16_t nsym, const q15_t centres[4], uint8_t* buffer, bool adapt = false, uint16_t* margins = 0) const;
+  bool    decodePayload(uint8_t* frame);
+  bool    checkPayloadCRC(uint32_t crcPos, int32_t step, const q15_t centres[4]);
+  bool    decodeHeader(uint8_t* frame);
+  int64_t segmentError(uint32_t pos, int32_t step, uint16_t nsym, const q15_t centres[4]) const;
+  void    sliceSegmented(uint32_t pos0, int32_t step, uint16_t nsym, const q15_t centres[4], uint8_t* buffer, uint32_t& endPos) const;
   void calculateLevels(uint16_t startPtr, uint16_t endPtr);
   void samplesToBits(uint16_t startPtr, uint16_t endPtr, uint8_t* buffer);
 };

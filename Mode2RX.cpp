@@ -67,6 +67,37 @@ const uint8_t BIT_MASK_TABLE[] = {0x80U, 0x40U, 0x20U, 0x10U, 0x08U, 0x04U, 0x02
 const uint8_t  NOAVEPTR = 99U;
 const uint16_t NOENDPTR = 9999U;
 
+// ---- payload timing search ----------------------------------------------
+//
+// The payload block is long enough that the difference between the
+// transmitter's symbol clock and this receiver's sample clock matters: at
+// 200 ppm the sampling instant drifts half a sample across 464 symbols, and
+// the sync correlator can only anchor it to the nearest whole sample in the
+// first place. Feedback loops were tried and measured worse than nothing --
+// a first order loop cannot take out a rate offset, and reacting per symbol
+// lets detector noise walk the sampling instant off the eye.
+//
+// So the timing is searched, not tracked. The whole block is already in
+// m_buffer when it is decoded, so the receiver tries a small grid of
+// (phase, rate) candidates, scores each by how cleanly the sampled values
+// fall into four level clusters, and slices with the winner. Positions are
+// fixed point, 1/65536 of a sample.
+const int32_t TIMING_ONE_SAMPLE  = 65536;
+const int32_t TIMING_STEP        = MODE2_RADIO_SYMBOL_LENGTH * TIMING_ONE_SAMPLE;
+const uint32_t TIMING_RING       = uint32_t(MODE2_MAX_LENGTH_SAMPLES) * uint32_t(TIMING_ONE_SAMPLE);
+
+// Rate candidates, as a step adjustment in 1/65536 sample per symbol.
+// 33 is almost exactly 100 ppm of the 327680 nominal step.
+const int32_t TIMING_RATE_STEP   = 8;      // ~24 ppm
+const int32_t TIMING_RATE_SPAN   = 24;     // ~ +/-590 ppm
+// Phase candidates, +/- half a sample in eighths.
+const int32_t TIMING_PHASE_STEP  = TIMING_ONE_SAMPLE / 16;
+const int32_t TIMING_PHASE_SPAN  = 32;     // +/- two whole samples
+// How many of the best scored candidates get a Reed-Solomon attempt.
+const uint8_t TIMING_ATTEMPTS    = 200U;
+// Header phase candidates: the full phase span at the nominal rate.
+const uint8_t HEADER_CANDIDATES  = uint8_t(2 * TIMING_PHASE_SPAN + 1);
+
 CMode2RX::CMode2RX() :
 m_state(MODE2RXS_NONE),
 m_rrc02Filter(),
@@ -87,6 +118,10 @@ m_threshold(),
 m_thresholdVal(0),
 m_averagePtr(NOAVEPTR),
 m_countdown(0U),
+m_trkPos(0U),
+m_trkStep(0),
+m_trkCentres(),
+m_trkValid(false),
 m_packet()
 {
   ::memset(m_rrc02State, 0x00U, 70U * sizeof(q15_t));
@@ -109,6 +144,7 @@ void CMode2RX::reset()
   m_thresholdVal = 0;
   m_countdown    = 0U;
   m_invert       = false;
+  m_trkValid     = false;
 }
 
 void CMode2RX::samples(q15_t* samples, uint8_t length)
@@ -184,9 +220,9 @@ void CMode2RX::processHeader(q15_t sample)
     calculateLevels(m_startPtr, m_endPtr);
 
     uint8_t frame[MODE2_HEADER_LENGTH_BYTES + MODE2_HEADER_PARITY_BYTES];
-    samplesToBits(m_startPtr, m_endPtr, frame);
 
-    bool ok = m_frame.processHeader(frame, m_packet);
+    bool ok = decodeHeader(frame);
+    
     if (ok) {
       uint16_t length = m_frame.getPayloadLength();
       if (length > 0U) {
@@ -196,10 +232,12 @@ void CMode2RX::processHeader(q15_t sample)
 
         length += m_frame.getPayloadParityLength();
 
-        // The payload starts right after the header
+        // The payload starts right after the header. The wait runs to the
+        // end of the CRC as well: every decode attempt is judged against the
+        // received CRC, so both have to be in the buffer before starting.
         m_startPtr = m_endPtr;
 
-        m_endPtr = m_startPtr + (length * MODE2_SYMBOLS_PER_BYTE * MODE2_RADIO_SYMBOL_LENGTH);
+        m_endPtr = m_startPtr + (length * MODE2_SYMBOLS_PER_BYTE * MODE2_RADIO_SYMBOL_LENGTH) + MODE2_CRC_LENGTH_SAMPLES;
         if (m_endPtr >= MODE2_MAX_LENGTH_SAMPLES)
           m_endPtr -= MODE2_MAX_LENGTH_SAMPLES;
       } else {
@@ -225,28 +263,20 @@ void CMode2RX::processHeader(q15_t sample)
 void CMode2RX::processPayload(q15_t sample)
 {
   if (m_dataPtr == m_endPtr) {
-    calculateLevels(m_startPtr, m_endPtr);
-
     uint8_t frame[1023U + (5U * MODE2_PAYLOAD_PARITY_BYTES)];
-    samplesToBits(m_startPtr, m_endPtr, frame);
 
-    bool ok = m_frame.processPayload(frame, m_packet);
+    bool ok = decodePayload(frame);
     if (ok) {
-      DEBUG1("Mode2RX: payload is valid");
+      DEBUG1("Mode2RX: payload and CRC are valid");
 
-      m_state = MODE2RXS_CRC;
-
-      // The CRC starts right after the payload
-      m_startPtr = m_endPtr;
-
-      m_endPtr = m_startPtr + MODE2_CRC_LENGTH_SAMPLES;
-      if (m_endPtr >= MODE2_MAX_LENGTH_SAMPLES)
-        m_endPtr -= MODE2_MAX_LENGTH_SAMPLES;
+      const uint16_t length = m_frame.getHeaderLength() + m_frame.getPayloadLength();
+      serial.writeKISSData(KISS_TYPE_DATA, m_packet, length);
     } else {
       DEBUG1("Mode2RX: payload is invalid");
-      io.setDecode(false);
-      reset();
     }
+
+    io.setDecode(false);
+    reset();
   }
 }
 
@@ -254,9 +284,59 @@ void CMode2RX::processCRC(q15_t sample)
 {
   if (m_dataPtr == m_endPtr) {
     uint8_t crc[MODE2_CRC_LENGTH_BYTES];
-    samplesToBits(m_startPtr, m_endPtr, crc);
+    bool ok = false;
+    if (m_trkValid) {
+      // Continue at the rate and phase the payload search settled on; by the
+      // CRC the accumulated drift is approaching a sample, and going back to
+      // the integer grid here throws the frame away at the last fence. The
+      // carried phase is itself only as good as the payload's winning
+      // candidate, so a few positions either side are tried too -- the CRC
+      // comparison is a 16 bit arbiter, so extra attempts cannot let a bad
+      // frame through, only stop a good one being lost.
+      const int32_t nudge[9] = { 0, -TIMING_PHASE_STEP, TIMING_PHASE_STEP,
+                                 -2 * TIMING_PHASE_STEP, 2 * TIMING_PHASE_STEP,
+                                 -4 * TIMING_PHASE_STEP, 4 * TIMING_PHASE_STEP,
+                                 -8 * TIMING_PHASE_STEP, 8 * TIMING_PHASE_STEP };
 
-    bool ok = m_frame.checkCRC(m_packet, crc);
+      uint8_t bestMismatch = 255U;
+
+      for (uint8_t i = 0U; i < 9U && !ok; i++) {
+        const uint32_t pos = uint32_t((int64_t(m_trkPos) + nudge[i] + TIMING_RING) % TIMING_RING);
+        sliceSymbols(pos, m_trkStep, MODE2_CRC_LENGTH_SYMBOLS, m_trkCentres, crc);
+        ok = m_frame.checkCRC(m_packet, crc);
+
+        if (!ok) {
+          // Soft comparison against the CRC this frame implies. The payload
+          // has already survived sixteen Reed-Solomon parity symbols, so the
+          // CRC's job here is to catch a miscorrected block -- and a
+          // miscorrected block's expected CRC is effectively random against
+          // the received symbols, disagreeing on about twelve of the
+          // sixteen. A dirty but genuine frame disagrees on a couple.
+          uint8_t expect[MODE2_CRC_LENGTH_BYTES];
+          m_frame.expectedCRC(m_packet, expect);
+
+          uint8_t mismatch = 0U;
+          for (uint8_t b = 0U; b < MODE2_CRC_LENGTH_BYTES; b++) {
+            const uint8_t x = crc[b] ^ expect[b];
+            for (uint8_t d = 0U; d < 4U; d++) {
+              if ((x >> (2U * d)) & 0x03U)
+                mismatch++;
+            }
+          }
+
+          if (mismatch < bestMismatch)
+            bestMismatch = mismatch;
+        }
+      }
+
+      if (!ok && bestMismatch <= 3U) {
+        DEBUG2("Mode2RX: CRC accepted on soft match, symbol mismatches", bestMismatch);
+        ok = true;
+      }
+    } else {
+      samplesToBits(m_startPtr, m_endPtr, crc);
+      ok = m_frame.checkCRC(m_packet, crc);
+    }
     if (ok) {
       DEBUG1("Mode2RX: frame CRC is valid");
 
@@ -507,4 +587,496 @@ void CMode2RX::samplesToBits(uint16_t startPtr, uint16_t endPtr, uint8_t* buffer
     if (startPtr >= MODE2_MAX_LENGTH_SAMPLES)
       startPtr -= MODE2_MAX_LENGTH_SAMPLES;
   }
+}
+
+q15_t CMode2RX::sampleAt(uint32_t pos) const
+{
+  uint16_t i = uint16_t(pos >> 16);
+  uint16_t j = i + 1U;
+  if (j >= MODE2_MAX_LENGTH_SAMPLES)
+    j = 0U;
+
+  const int32_t frac = int32_t(pos & 0xFFFFU);
+  const int32_t a    = m_buffer[i];
+  const int32_t b    = m_buffer[j];
+
+  int32_t v = a + (((b - a) * frac) >> 16);
+  if (m_invert)
+    v = -v;
+
+  return q15_t(v);
+}
+
+// Score one (phase, rate) candidate and report its four cluster centres.
+//
+// Three passes: the global mean, then a split of each side into its two
+// levels, then the sums that give the within and between cluster variances.
+// The score is within/between scaled up -- smaller is better. Everything is
+// integer; the sums of squares need 64 bits.
+int64_t CMode2RX::scoreCandidate(uint32_t pos0, int32_t step, uint16_t nsym, q15_t centres[4]) const
+{
+  const int32_t sstep = step;
+  const uint16_t scount = nsym;
+
+  uint32_t pos;
+  int64_t  sum = 0;
+
+  pos = pos0;
+  for (uint16_t n = 0U; n < scount; n++) {
+    sum += sampleAt(pos);
+    pos = uint32_t(pos + sstep) % TIMING_RING;
+  }
+  const int32_t gmean = int32_t(sum / scount);
+
+  int64_t  posSum = 0, negSum = 0;
+  uint16_t posCnt = 0U, negCnt = 0U;
+
+  pos = pos0;
+  for (uint16_t n = 0U; n < scount; n++) {
+    const int32_t v = sampleAt(pos);
+    if (v >= gmean) { posSum += v; posCnt++; }
+    else            { negSum += v; negCnt++; }
+    pos = uint32_t(pos + sstep) % TIMING_RING;
+  }
+  if (posCnt == 0U || negCnt == 0U)
+    return INT64_MAX;
+
+  const int32_t posMean = int32_t(posSum / posCnt);
+  const int32_t negMean = int32_t(negSum / negCnt);
+
+  int64_t  cSum[4] = {0, 0, 0, 0};
+  int64_t  cSq[4]  = {0, 0, 0, 0};
+  uint16_t cCnt[4] = {0U, 0U, 0U, 0U};
+
+  pos = pos0;
+  for (uint16_t n = 0U; n < scount; n++) {
+    const int32_t v = sampleAt(pos);
+    uint8_t c;
+    if (v >= gmean)
+      c = (v >= posMean) ? 3U : 2U;
+    else
+      c = (v <= negMean) ? 0U : 1U;
+    cSum[c] += v;
+    cSq[c]  += int64_t(v) * v;
+    cCnt[c]++;
+    pos = uint32_t(pos + sstep) % TIMING_RING;
+  }
+
+  int64_t within  = 0;
+  int64_t between = 0;
+
+  for (uint8_t c = 0U; c < 4U; c++) {
+    if (cCnt[c] == 0U) {
+      centres[c] = 0;
+      continue;
+    }
+    const int64_t mean = cSum[c] / cCnt[c];
+    centres[c] = q15_t(mean);
+    within  += cSq[c] - mean * cSum[c];
+    between += (mean - gmean) * (mean - gmean) * cCnt[c];
+  }
+
+  if (between <= 0)
+    return INT64_MAX;
+
+  return (within << 16) / between;
+}
+
+// How badly nsym symbols starting at pos fit the given cluster centres:
+// the summed distance from each sample to its nearest centre.
+int64_t CMode2RX::segmentError(uint32_t pos, int32_t step, uint16_t nsym, const q15_t centres[4]) const
+{
+  const int32_t m1 = (int32_t(centres[0]) + int32_t(centres[1])) / 2;
+  const int32_t m2 = (int32_t(centres[1]) + int32_t(centres[2])) / 2;
+  const int32_t m3 = (int32_t(centres[2]) + int32_t(centres[3])) / 2;
+
+  int64_t err = 0;
+
+  for (uint16_t n = 0U; n < nsym; n++) {
+    const int32_t v = sampleAt(pos);
+
+    int32_t c;
+    if (v < m1)      c = centres[0];
+    else if (v < m2) c = centres[1];
+    else if (v < m3) c = centres[2];
+    else             c = centres[3];
+
+    err += (v > c) ? (v - c) : (c - v);
+
+    pos = uint32_t(pos + step) % TIMING_RING;
+  }
+
+  return err;
+}
+
+// Slice nsym symbols in segments, re-anchoring the sampling phase at the
+// start of each. A linear phase-plus-rate model assumes the clock error is
+// smooth; a dropped or repeated sample in the capture chain is a step, and
+// against a step the best line is wrong everywhere. Short segments follow
+// steps. The phase found for each segment carries into the next, so the
+// search per segment only needs to cover a small neighbourhood.
+void CMode2RX::sliceSegmented(uint32_t pos0, int32_t step, uint16_t nsym, const q15_t centres[4], uint8_t* buffer, uint32_t& endPos) const
+{
+  const uint16_t SEG = 16U;
+
+  uint32_t pos    = pos0;
+  uint16_t offset = 0U;
+  uint16_t done   = 0U;
+
+  while (done < nsym) {
+    uint16_t n = nsym - done;
+    if (n > SEG)
+      n = SEG;
+
+    // Local phase search around the carried position. The window is wide
+    // enough, at +/- 1.25 samples, to step over a whole dropped or repeated
+    // sample in the capture chain, and the segment is short enough that the
+    // symbols sliced before such a step are few for the Reed-Solomon parity.
+    int64_t  bestErr = INT64_MAX;
+    uint32_t bestPos = pos;
+
+    for (int32_t d = -20; d <= 20; d++) {
+      const uint32_t p = uint32_t((int64_t(pos) + int64_t(d) * (TIMING_ONE_SAMPLE / 16) + TIMING_RING) % TIMING_RING);
+      const int64_t e = segmentError(p, step, n, centres);
+      if (e < bestErr) {
+        bestErr = e;
+        bestPos = p;
+      }
+    }
+
+    // Slice this segment at the locally best phase.
+    uint32_t p = bestPos;
+    const int32_t m1 = (int32_t(centres[0]) + int32_t(centres[1])) / 2;
+    const int32_t m2 = (int32_t(centres[1]) + int32_t(centres[2])) / 2;
+    const int32_t m3 = (int32_t(centres[2]) + int32_t(centres[3])) / 2;
+
+    for (uint16_t k = 0U; k < n; k++) {
+      const int32_t v = sampleAt(p);
+
+      bool b0, b1;
+      if (v < m1)      { b0 = false; b1 = true;  }
+      else if (v < m2) { b0 = false; b1 = false; }
+      else if (v < m3) { b0 = true;  b1 = false; }
+      else             { b0 = true;  b1 = true;  }
+
+      WRITE_BIT1(buffer, offset, b0);
+      offset++;
+      WRITE_BIT1(buffer, offset, b1);
+      offset++;
+
+      p = uint32_t(p + step) % TIMING_RING;
+    }
+
+
+    pos  = p;
+    done = uint16_t(done + n);
+  }
+
+  endPos = pos;
+}
+
+// Slice nsym symbols by nearest cluster centre. The centre order is
+// {-3, -1, +1, +3} and the dibit mapping matches the transmitter's:
+// 01, 00, 10, 11.
+void CMode2RX::sliceSymbols(uint32_t pos0, int32_t step, uint16_t nsym, const q15_t centres[4], uint8_t* buffer, bool adapt, uint16_t* margins) const
+{
+  // The centres drift with the signal as the block is sliced: after each
+  // decision the chosen cluster's centre moves a 32nd of the way toward the
+  // sample. The capture path is AC coupled, so the baseline wanders slowly
+  // within a long block; centres estimated once over the whole block are
+  // right on average and wrong at both ends. The adaptation is
+  // decision-directed, and a wrong decision nudges the wrong centre by a
+  // 32nd of a small distance, so it recovers.
+  int32_t c[4] = { centres[0], centres[1], centres[2], centres[3] };
+
+  uint32_t pos    = pos0;
+  uint16_t offset = 0U;
+
+  for (uint16_t n = 0U; n < nsym; n++) {
+    const int32_t v = sampleAt(pos);
+
+    const int32_t m1 = (c[0] + c[1]) / 2;
+    const int32_t m2 = (c[1] + c[2]) / 2;
+    const int32_t m3 = (c[2] + c[3]) / 2;
+
+    bool b0, b1;
+    uint8_t k;
+    if (v < m1)      { b0 = false; b1 = true;  k = 0U; }   // -3
+    else if (v < m2) { b0 = false; b1 = false; k = 1U; }   // -1
+    else if (v < m3) { b0 = true;  b1 = false; k = 2U; }   // +1
+    else             { b0 = true;  b1 = true;  k = 3U; }   // +3
+
+    if (margins != 0) {
+      // Confidence of this decision: distance to the nearest boundary. A
+      // byte's confidence is that of its shakiest symbol.
+      int32_t dist = 32767;
+      if (k > 0U)  { const int32_t lo[3] = {m1, m2, m3}; const int32_t d1 = v - lo[k - 1U]; if (d1 < dist) dist = d1; }
+      if (k < 3U)  { const int32_t hi[3] = {m1, m2, m3}; const int32_t d2 = hi[k] - v;      if (d2 < dist) dist = d2; }
+      const uint16_t byteIndex = uint16_t(n / 4U);
+      if ((n % 4U) == 0U || uint16_t(dist) < margins[byteIndex])
+        margins[byteIndex] = uint16_t(dist < 0 ? 0 : dist);
+    }
+
+    if (adapt)
+      c[k] += (v - c[k]) / 32;
+
+    WRITE_BIT1(buffer, offset, b0);
+    offset++;
+    WRITE_BIT1(buffer, offset, b1);
+    offset++;
+
+    pos = uint32_t(pos + step) % TIMING_RING;
+  }
+}
+
+bool CMode2RX::decodePayload(uint8_t* frame)
+{
+  const uint16_t span = ((m_endPtr >= m_startPtr)
+                          ? uint16_t(m_endPtr - m_startPtr)
+                          : uint16_t(m_endPtr + MODE2_MAX_LENGTH_SAMPLES - m_startPtr))
+                        - MODE2_CRC_LENGTH_SAMPLES;
+  const uint16_t nsym = span / MODE2_RADIO_SYMBOL_LENGTH;
+
+  // Score the whole grid, keeping the best few candidates.
+  int64_t  bestScore[TIMING_ATTEMPTS];
+  uint32_t bestPos[TIMING_ATTEMPTS];
+  int32_t  bestStep[TIMING_ATTEMPTS];
+  q15_t    bestCentres[TIMING_ATTEMPTS][4];
+
+  for (uint8_t i = 0U; i < TIMING_ATTEMPTS; i++)
+    bestScore[i] = INT64_MAX;
+
+  for (int32_t r = -TIMING_RATE_SPAN; r <= TIMING_RATE_SPAN; r++) {
+    const int32_t step = TIMING_STEP + r * TIMING_RATE_STEP;
+
+    for (int32_t p = -TIMING_PHASE_SPAN; p <= TIMING_PHASE_SPAN; p++) {
+      const int64_t start = int64_t(m_startPtr) * TIMING_ONE_SAMPLE + int64_t(p) * TIMING_PHASE_STEP;
+      const uint32_t pos0 = uint32_t((start + TIMING_RING) % TIMING_RING);
+
+      q15_t centres[4];
+      const int64_t score = scoreCandidate(pos0, step, nsym, centres);
+
+      // Insert into the top list, kept sorted best first.
+      for (uint8_t i = 0U; i < TIMING_ATTEMPTS; i++) {
+        if (score < bestScore[i]) {
+          for (uint8_t j = TIMING_ATTEMPTS - 1U; j > i; j--) {
+            bestScore[j] = bestScore[j - 1U];
+            bestPos[j]   = bestPos[j - 1U];
+            bestStep[j]  = bestStep[j - 1U];
+            ::memcpy(bestCentres[j], bestCentres[j - 1U], sizeof(bestCentres[j]));
+          }
+          bestScore[i] = score;
+          bestPos[i]   = pos0;
+          bestStep[i]  = step;
+          ::memcpy(bestCentres[i], centres, sizeof(centres));
+          break;
+        }
+      }
+    }
+  }
+
+
+  // Try the best candidates in order; the Reed-Solomon decode is the final
+  // arbiter of which slicing was right. Erasure decoding is kept for a
+  // second sweep over the whole candidate list: it is powerful enough to
+  // force a marginally wrong slicing into a valid-looking codeword, so it
+  // only runs once every straight attempt has failed.
+  for (uint8_t round = 0U; round < 2U; round++) {
+    for (uint8_t i = 0U; i < TIMING_ATTEMPTS; i++) {
+      if (bestScore[i] == INT64_MAX)
+        break;
+
+      uint64_t end = uint64_t(bestPos[i]) + uint64_t(uint32_t(bestStep[i])) * nsym;
+      uint32_t endPos = uint32_t(end % TIMING_RING);
+      bool ok = false;
+
+      if (round == 0U) {
+        // Three slicings: fixed centres, centres that adapt as the block is
+        // sliced, then segment-wise phase re-anchoring. Each suits a
+        // different impairment.
+        for (uint8_t pass = 0U; pass < 3U && !ok; pass++) {
+          if (pass < 2U)
+            sliceSymbols(bestPos[i], bestStep[i], nsym, bestCentres[i], frame, pass == 1U);
+          else
+            sliceSegmented(bestPos[i], bestStep[i], nsym, bestCentres[i], frame, endPos);
+
+          m_frame.rewindPayload();
+          ok = m_frame.processPayload(frame, m_packet);
+        }
+      } else {
+        // Erasure round: re-slice recording per byte confidence and let the
+        // decoder treat the least confident bytes as erasures. E erasures
+        // cost E of the 16 parity symbols but are corrected outright,
+        // doubling the power over errors-only decoding exactly when the eye
+        // is at its worst.
+        // Two independent slicings of the block. A byte the two disagree on
+        // was decided by less than the difference between the models, which
+        // makes it a better erasure candidate than any margin threshold; the
+        // remaining erasure budget goes to the lowest margins.
+        uint16_t margins[1023U + 5U * MODE2_PAYLOAD_PARITY_BYTES];
+        uint8_t  alt[1023U + 5U * MODE2_PAYLOAD_PARITY_BYTES];
+
+        const uint16_t nbytes = nsym / 4U;
+        for (uint16_t k = 0U; k < nbytes; k++)
+          margins[k] = 0xFFFFU;
+
+        sliceSymbols(bestPos[i], bestStep[i], nsym, bestCentres[i], frame, false, margins);
+        sliceSymbols(bestPos[i], bestStep[i], nsym, bestCentres[i], alt, true);
+
+        for (uint16_t k = 0U; k < nbytes; k++) {
+          if (frame[k] != alt[k])
+            margins[k] = 0U;
+          else if (margins[k] == 0U)
+            margins[k] = 1U;
+        }
+
+        const uint8_t ladder[5] = { 8U, 10U, 12U, 14U, 16U };
+
+        for (uint8_t mode = 0U; mode < 2U && !ok; mode++) {
+          const uint8_t* attempt = (mode == 0U) ? frame : alt;
+          if (mode == 1U)
+            ::memcpy(frame, alt, nbytes);
+
+          for (uint8_t e = 0U; e < 5U && !ok; e++) {
+            m_frame.rewindPayload();
+            ok = m_frame.processPayloadErasures(frame, m_packet, margins, ladder[e]);
+            if (ok && !checkPayloadCRC(endPos, bestStep[i], bestCentres[i]))
+              ok = false;
+          }
+          (void)attempt;
+        }
+      }
+
+      if (round == 0U && ok)
+        ok = checkPayloadCRC(endPos, bestStep[i], bestCentres[i]);
+
+      if (ok)
+        return true;
+    }
+  }
+
+  return false;
+}
+
+// Judge a decoded payload against the CRC that followed it on the air.
+//
+// The Reed-Solomon decode alone is not a safe acceptance test once erasures
+// are in play: flag enough bytes and a wrong slicing can be forced into a
+// valid looking codeword. The CRC is judged softly -- the frame's expected
+// CRC symbols against the sliced ones, best of a few phase nudges -- because
+// its sixteen symbols get no error correction of their own on a channel
+// where everything else does. A miscorrected payload implies an effectively
+// random CRC, disagreeing on about twelve symbols of sixteen; a genuine one
+// disagrees on a couple even when the eye is poor.
+bool CMode2RX::checkPayloadCRC(uint32_t crcPos, int32_t step, const q15_t centres[4])
+{
+  const int32_t nudge[9] = { 0, -TIMING_PHASE_STEP, TIMING_PHASE_STEP,
+                             -2 * TIMING_PHASE_STEP, 2 * TIMING_PHASE_STEP,
+                             -4 * TIMING_PHASE_STEP, 4 * TIMING_PHASE_STEP,
+                             -8 * TIMING_PHASE_STEP, 8 * TIMING_PHASE_STEP };
+
+  uint8_t expect[MODE2_CRC_LENGTH_BYTES];
+  m_frame.expectedCRC(m_packet, expect);
+
+  uint8_t bestMismatch = 255U;
+
+  for (uint8_t i = 0U; i < 9U; i++) {
+    const uint32_t pos = uint32_t((int64_t(crcPos) + nudge[i] + TIMING_RING) % TIMING_RING);
+
+    uint8_t crc[MODE2_CRC_LENGTH_BYTES];
+    sliceSymbols(pos, step, MODE2_CRC_LENGTH_SYMBOLS, centres, crc);
+
+    if (m_frame.checkCRC(m_packet, crc))
+      return true;
+
+    uint8_t mismatch = 0U;
+    for (uint8_t b = 0U; b < MODE2_CRC_LENGTH_BYTES; b++) {
+      const uint8_t x = crc[b] ^ expect[b];
+      for (uint8_t d = 0U; d < 4U; d++) {
+        if ((x >> (2U * d)) & 0x03U)
+          mismatch++;
+      }
+    }
+
+    if (mismatch < bestMismatch)
+      bestMismatch = mismatch;
+  }
+
+  if (bestMismatch <= 3U) {
+    DEBUG2("Mode2RX: CRC accepted on soft match, symbol mismatches", bestMismatch);
+    return true;
+  }
+
+  return false;
+}
+
+// Decode the header by a phase search over its 60 symbols.
+//
+// The header is short enough that clock rate drift within it is negligible,
+// but the sampling instant the sync correlator anchors is only good to the
+// nearest whole sample, and the header's ten payload length bits ride on the
+// fragile +3 versus +1 magnitude decisions. Worse, the header carries only
+// two Reed-Solomon parity symbols, and a two parity decoder run over a
+// marginal slicing does not fail -- it invents a one byte correction and
+// hands back a wrong length with a straight face. The receiver then waits
+// out a phantom payload while the real one streams past unread.
+//
+// So candidates are tried cleanest first: a slicing that forms a valid
+// codeword with no correction at all is accepted before any slicing that
+// needed the decoder's help.
+bool CMode2RX::decodeHeader(uint8_t* frame)
+{
+  const uint16_t nsym = MODE2_HEADER_LENGTH_SYMBOLS + MODE2_HEADER_PARITY_SYMBOLS;
+
+  int64_t  score[HEADER_CANDIDATES];
+  uint32_t posAt[HEADER_CANDIDATES];
+  q15_t    centres[HEADER_CANDIDATES][4];
+  uint8_t  order[HEADER_CANDIDATES];
+  uint8_t  count = 0U;
+
+  for (int32_t p = -TIMING_PHASE_SPAN; p <= TIMING_PHASE_SPAN; p++) {
+    const int64_t start = int64_t(m_startPtr) * TIMING_ONE_SAMPLE + int64_t(p) * TIMING_PHASE_STEP;
+    const uint32_t pos0 = uint32_t((start + TIMING_RING) % TIMING_RING);
+
+    q15_t c[4];
+    const int64_t sc = scoreCandidate(pos0, TIMING_STEP, nsym, c);
+    if (sc == INT64_MAX)
+      continue;
+
+    score[count] = sc;
+    posAt[count] = pos0;
+    ::memcpy(centres[count], c, sizeof(c));
+    order[count] = count;
+    count++;
+  }
+
+  // Sort candidate indices by score, best first.
+  for (uint8_t i = 1U; i < count; i++) {
+    const uint8_t o = order[i];
+    uint8_t j = i;
+    while (j > 0U && score[order[j - 1U]] > score[o]) {
+      order[j] = order[j - 1U];
+      j--;
+    }
+    order[j] = o;
+  }
+
+  // Pass 1: only a clean codeword will do. Pass 2: accept a corrected one.
+  for (uint8_t pass = 0U; pass < 2U; pass++) {
+    for (uint8_t i = 0U; i < count; i++) {
+      const uint8_t o = order[i];
+
+      sliceSymbols(posAt[o], TIMING_STEP, nsym, centres[o], frame);
+
+      if (!m_frame.processHeader(frame, m_packet))
+        continue;
+
+      if (pass == 0U && m_frame.getLastCorrections() != 0)
+        continue;
+
+      return true;
+    }
+  }
+
+  return false;
 }

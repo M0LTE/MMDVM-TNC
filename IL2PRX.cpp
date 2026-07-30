@@ -65,7 +65,8 @@ m_largeBlockSize(0U),
 m_largeBlockCount(0U),
 m_smallBlockCount(0U),
 m_paritySymbolsPerBlock(0U),
-m_outOffset(0U)
+m_outOffset(0U),
+m_lastCorrections(0)
 {
 }
 
@@ -118,6 +119,116 @@ bool CIL2PRX::processPayload(const uint8_t* in, uint8_t* out)
 
     payloadOffset += m_smallBlockSize + m_paritySymbolsPerBlock;
     m_outOffset   += m_smallBlockSize;
+  }
+
+  return true;
+}
+
+int CIL2PRX::getLastCorrections() const
+{
+  return m_lastCorrections;
+}
+
+void CIL2PRX::rewindPayload()
+{
+  m_outOffset = m_headerByteCount;
+}
+
+bool CIL2PRX::processPayloadErasures(const uint8_t* in, uint8_t* out, const uint16_t* margins, uint8_t maxErasures)
+{
+  uint16_t payloadOffset = 0U;
+
+  for (uint16_t i = 0U; i < m_largeBlockCount; i++) {
+    ::memcpy(out + m_outOffset, in + payloadOffset, m_largeBlockSize + m_paritySymbolsPerBlock);
+    bool ok = decodeErasures(out + m_outOffset, m_largeBlockSize, m_paritySymbolsPerBlock, margins + payloadOffset, maxErasures);
+    if (!ok)
+      return false;
+
+    unscramble(out + m_outOffset, m_largeBlockSize);
+
+    payloadOffset += m_largeBlockSize + m_paritySymbolsPerBlock;
+    m_outOffset   += m_largeBlockSize;
+  }
+
+  for (uint16_t i = 0U; i < m_smallBlockCount; i++) {
+    ::memcpy(out + m_outOffset, in + payloadOffset, m_smallBlockSize + m_paritySymbolsPerBlock);
+    bool ok = decodeErasures(out + m_outOffset, m_smallBlockSize, m_paritySymbolsPerBlock, margins + payloadOffset, maxErasures);
+    if (!ok)
+      return false;
+
+    unscramble(out + m_outOffset, m_smallBlockSize);
+
+    payloadOffset += m_smallBlockSize + m_paritySymbolsPerBlock;
+    m_outOffset   += m_smallBlockSize;
+  }
+
+  return true;
+}
+
+// The erasure counterpart of decode(): the maxErasures least confident of the
+// block's n bytes are declared erasures, which the decoder corrects for free,
+// keeping its remaining capacity for the errors nobody saw coming.
+bool CIL2PRX::decodeErasures(uint8_t* buffer, uint16_t length, uint8_t numSymbols, const uint16_t* margins, uint8_t maxErasures) const
+{
+  uint16_t n = length + numSymbols;
+
+  if (maxErasures > numSymbols)
+    maxErasures = numSymbols;
+
+  uint8_t rsBlock[RS_BLOCK_LENGTH];
+  ::memset(rsBlock, 0x00U, RS_BLOCK_LENGTH - n);
+  ::memcpy(rsBlock + RS_BLOCK_LENGTH - n, buffer, n);
+
+  // Pick the maxErasures smallest margins. n is at most 255 and maxErasures
+  // at most 16, so a simple selection is fine.
+  uint8_t derrlocs[16U];
+  ::memset(derrlocs, 0x00U, 16U * sizeof(uint8_t));
+
+  bool used[RS_BLOCK_LENGTH];
+  ::memset(used, 0x00, sizeof(used));
+
+  uint8_t count = 0U;
+  for (uint8_t e = 0U; e < maxErasures; e++) {
+    uint16_t best      = 0xFFFFU;
+    int      bestIndex = -1;
+
+    for (uint16_t i = 0U; i < n; i++) {
+      if (!used[i] && margins[i] < best) {
+        best      = margins[i];
+        bestIndex = int(i);
+      }
+    }
+
+    if (bestIndex < 0)
+      break;
+
+    used[bestIndex] = true;
+    derrlocs[count] = uint8_t(RS_BLOCK_LENGTH - n + bestIndex);
+    count++;
+  }
+
+  int derrors = 0;
+  switch (numSymbols) {
+    case 2U:
+      derrors = m_rs2.decode(rsBlock, derrlocs, count);
+      break;
+    case 16U:
+      derrors = m_rs16.decode(rsBlock, derrlocs, count);
+      break;
+    default:
+      return false;
+  }
+
+  m_lastCorrections = derrors;
+
+  ::memcpy(buffer, rsBlock + RS_BLOCK_LENGTH - n, length);
+
+  if (derrors < 0)
+    return false;
+
+  for (int i = 0; i < derrors; i++) {
+    if (derrlocs[i] < (RS_BLOCK_LENGTH - n))
+      return false;
   }
 
   return true;
@@ -339,6 +450,16 @@ bool CIL2PRX::checkCRC(const uint8_t* frame, const uint8_t* crc) const
   return crc1 == crc2;
 }
 
+void CIL2PRX::expectedCRC(const uint8_t* frame, uint8_t* crc) const
+{
+  const uint16_t crc2 = m_crc.calculate(frame, m_headerByteCount + m_payloadByteCount);
+
+  crc[0U] = m_hamming.encode((crc2 >> 12) & 0x0FU);
+  crc[1U] = m_hamming.encode((crc2 >> 8)  & 0x0FU);
+  crc[2U] = m_hamming.encode((crc2 >> 4)  & 0x0FU);
+  crc[3U] = m_hamming.encode((crc2 >> 0)  & 0x0FU);
+}
+
 void CIL2PRX::unscramble(uint8_t* buffer, uint16_t length) const
 {
   const uint16_t bitLength = length * 8U;
@@ -390,6 +511,8 @@ bool CIL2PRX::decode(uint8_t* buffer, uint16_t length, uint8_t numSymbols) const
     default:
       break;
   }
+
+  m_lastCorrections = derrors;
 
   ::memcpy(buffer, rsBlock + RS_BLOCK_LENGTH - n, length);
 

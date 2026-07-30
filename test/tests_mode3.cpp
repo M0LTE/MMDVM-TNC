@@ -164,6 +164,6 @@ TF_TEST(mode3_ninotnc_bulk_decode_rate)
   std::printf("      decoded %u of 100 beacons\n", got);
 
   /* Raise this as the receiver improves. The target is 100. */
-  CHECK_MSG(got >= 1U,
-            "decoded " << got << " of 100 beacons from the 19200 bulk capture");
+  CHECK_MSG(got >= 81U,
+            "decoded " << got << " of 100 beacons from the 19200 bulk capture; the floor is 81");
 }
