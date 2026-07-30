@@ -36,7 +36,9 @@
 #include "Radio.h"
 #include "shim/TestHooks.h"
 
+#include <cstdio>
 #include <cstdlib>
+#include <cstdio>
 #include <cstdlib>
 #include <set>
 #include <string>
@@ -93,6 +95,8 @@ TF_TEST(ninotnc_bulk_9600_decode_rate)
   REQUIRE(!pcm.empty());
 
   const unsigned got = beaconsDecoded(radio::demodulate(radio::toAdc(radio::decimate(pcm, 2U), 695)));
+
+  std::printf("      decoded %u of 100 beacons\n", got);
 
   /* Raise this as the receiver improves. The target is 100. */
   CHECK_MSG(got >= 38U,
