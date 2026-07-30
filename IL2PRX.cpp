@@ -393,6 +393,12 @@ bool CIL2PRX::decode(uint8_t* buffer, uint16_t length, uint8_t numSymbols) const
 
   ::memcpy(buffer, rsBlock + RS_BLOCK_LENGTH - n, length);
 
+  // A negative count means the decoder gave up: the block has more errors
+  // than the parity can carry and the data is still raw. Without this the
+  // loop below simply does not run and the block is reported as good.
+  if (derrors < 0)
+    return false;
+
   // It is possible to have a situation where too many errors are
   // present but the algorithm could get a good code block by "fixing"
   // one of the padding bytes that should be 0.
