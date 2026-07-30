@@ -53,7 +53,12 @@ namespace radio {
     /* Residual DC on the ADC input, in LSB. */
     int dcOffset;
 
-    Channel() : phase(0U), invert(false), gain(1.0), dcOffset(0) { }
+    /* Peak uniform noise added at the ADC, in LSB. Deterministic: the same
+       seed always produces the same noise. */
+    unsigned noise;
+    uint32_t seed;
+
+    Channel() : phase(0U), invert(false), gain(1.0), dcOffset(0), noise(0U), seed(1U) { }
   };
 
   /* An ordinary AX.25 UI frame, the sort of thing a TNC actually carries.
