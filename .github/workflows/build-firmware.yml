@@ -26,7 +26,7 @@ jobs:
       - id: v
         name: Derive the build version
         run: |
-          echo "version=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+          echo "version=$(date -u +%Y%m%d)-m0lte" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
   tests:
@@ -61,7 +61,7 @@ jobs:
 
       - name: Stamp the merge date into Version.h
         run: |
-          sed -i 's/#define VERSION "[0-9]*"/#define VERSION "${{ needs.meta.outputs.version }}"/' Version.h
+          sed -i 's/#define VERSION "[^"]*"/#define VERSION "${{ needs.meta.outputs.version }}"/' Version.h
           grep '#define VERSION' Version.h
 
       # IOPins.h refuses to compile for the Nucleo without one of the two
