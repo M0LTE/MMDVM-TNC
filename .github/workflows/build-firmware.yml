@@ -1,22 +1,55 @@
-name: Build firmware
+name: Build and release firmware
 
-# Master only, plus manual runs. Branch pushes are covered by the host test
-# suite; there is no point cross-compiling on every push to a topic branch.
+# Every push to master runs the host test suite, cross-compiles the firmware,
+# and publishes a GitHub Release whose notes are the merged PRs since the
+# previous release. workflow_dispatch runs the tests and builds without
+# releasing, for checking a branch.
 on:
   push:
     branches:
       - master
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      sha: ${{ steps.v.outputs.sha }}
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - id: v
+        name: Derive the build version
+        run: |
+          echo "version=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Build and run the host test suite
+        run: make -C test
+
+      - name: Re-run under the sanitisers
+        run: make -C test clean && make -C test SAN=1
+
   build:
+    needs: [meta, tests]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         target:
-          - { name: nucleo, make: nucleo }
           - { name: pi,     make: pi }
+          - { name: nucleo, make: nucleo }
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
@@ -25,6 +58,11 @@ jobs:
 
       - name: Install the ARM toolchain
         run: sudo apt-get update -qq && sudo apt-get install -qy gcc-arm-none-eabi
+
+      - name: Stamp the merge date into Version.h
+        run: |
+          sed -i 's/#define VERSION "[0-9]*"/#define VERSION "${{ needs.meta.outputs.version }}"/' Version.h
+          grep '#define VERSION' Version.h
 
       # IOPins.h refuses to compile for the Nucleo without one of the two
       # header layouts chosen, and stock Config.h has both commented out.
@@ -37,9 +75,37 @@ jobs:
       - name: Build ${{ matrix.target.name }}
         run: make ${{ matrix.target.make }}
 
+      - name: Name the image
+        run: cp bin/mmdvm_f4.hex mmdvm-tnc-${{ matrix.target.name }}-${{ needs.meta.outputs.version }}-${{ needs.meta.outputs.sha }}.hex
+
       - name: Archive built firmware
         uses: actions/upload-artifact@v4
         with:
           name: mmdvm-tnc-${{ matrix.target.name }}
-          path: bin/mmdvm_f4.hex
+          path: mmdvm-tnc-*.hex
           if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push'
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Collect the firmware images
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mmdvm-tnc-*
+          merge-multiple: true
+          path: dist
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ needs.meta.outputs.version }}-${{ needs.meta.outputs.sha }}"
+          gh release create "$TAG" dist/*.hex \
+            --title "MMDVM-TNC $TAG" \
+            --generate-notes \
+            --target "$GITHUB_SHA"
