@@ -171,9 +171,19 @@ void CIL2PRS::encode(uint8_t* data, uint8_t* parity) const
 
 int CIL2PRS::decode(uint8_t* data, uint8_t* eras_pos) const
 {
+  return decode(data, eras_pos, 0);
+}
+
+/* Errors-and-erasures decoding, as in Phil Karn's reference implementation.
+ * eras_pos carries no_eras known-unreliable positions on entry and all
+ * corrected locations on exit. With E erasures the code corrects E plus
+ * (NROOTS - E) / 2 further unknown errors, so flagging genuinely doubtful
+ * bytes doubles the correcting power over errors-only decoding. */
+int CIL2PRS::decode(uint8_t* data, uint8_t* eras_pos, int no_eras) const
+{
   int deg_lambda, el, deg_omega;
   int i, j, r,k;
-  uint8_t q,tmp,num1,num2,den,discr_r;
+  uint8_t u,q,tmp,num1,num2,den,discr_r;
   uint8_t lambda[NROOTS+1], s[NROOTS];	/* Err+Eras Locator poly
 					 * and syndrome poly */
   uint8_t b[NROOTS+1], t[NROOTS+1], omega[NROOTS+1];
@@ -211,6 +221,19 @@ int CIL2PRS::decode(uint8_t* data, uint8_t* eras_pos) const
   ::memset(&lambda[1],0,NROOTS*sizeof(lambda[0]));
   lambda[0] = 1;
 
+  if (no_eras > 0) {
+    /* Init lambda to be the erasure locator polynomial */
+    lambda[1] = ALPHA_TO[MODNN(PRIM*(NN-1-eras_pos[0]))];
+    for (i = 1; i < no_eras; i++) {
+      u = MODNN(PRIM*(NN-1-eras_pos[i]));
+      for (j = i+1; j > 0; j--) {
+	tmp = INDEX_OF[lambda[j-1]];
+	if(tmp != A0)
+	  lambda[j] ^= ALPHA_TO[MODNN(u + tmp)];
+      }
+    }
+  }
+
   for(i=0;i<NROOTS+1;i++)
     b[i] = INDEX_OF[lambda[i]];
   
@@ -218,8 +241,8 @@ int CIL2PRS::decode(uint8_t* data, uint8_t* eras_pos) const
    * Begin Berlekamp-Massey algorithm to determine error+erasure
    * locator polynomial
    */
-  r = 0;
-  el = 0;
+  r = no_eras;
+  el = no_eras;
   while (++r <= NROOTS) {	/* r is the step number */
     /* Compute discrepancy at the r-th step in poly-form */
     discr_r = 0;

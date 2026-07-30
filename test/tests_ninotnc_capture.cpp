@@ -216,28 +216,28 @@ TF_TEST(ninotnc_9600_frames_decode_end_to_end)
   CHECK_EQ(int(f[16]), int(0xF0U));            /* no layer 3 */
 }
 
-TF_TEST(ninotnc_9600_a_payload_that_fails_fec_is_not_passed_to_the_host)
+TF_TEST(ninotnc_9600_all_ten_frames_decode)
 {
   /*
-   * One of the ten payloads still exceeds what the Reed-Solomon code can
-   * carry. What must not happen is the receiver handing that frame to the
-   * host anyway.
-   *
-   * The Reed-Solomon decoder returns -1 for this block. Until that negative
-   * return was honoured it was read as success and the corrupt payload went on
-   * to the CRC. This pins the fix down on real off-air data rather than a
-   * synthetic case.
+   * Originally one of the ten payloads exceeded what errors-only
+   * Reed-Solomon could carry and this test pinned down that the receiver
+   * refused it rather than passing it to the host. The timing search and
+   * erasure decoding recover that frame now, so the capture decodes in
+   * full; what remains pinned is that nothing bogus is delivered alongside.
    */
   const std::vector<uint16_t> adc = capture(NOMINAL_PEAK);
   REQUIRE(!adc.empty());
 
   const std::vector<std::vector<uint8_t> > frames = radio::demodulate(adc);
 
-  CHECK_MSG(hooks::debugContains("payload is invalid"),
-            "expected the over-budget payload to be reported as invalid");
+  unsigned beacons = 0U;
+  for (size_t i = 0U; i < frames.size(); i++) {
+    const std::string body(frames[i].begin() + 1, frames[i].end());
+    if (body.find("Beacon from M0LTE") != std::string::npos)
+      beacons++;
+  }
 
-  /* Ten transmissions, ten headers, and one payload the code cannot carry --
-     so nine frames reach the host, not ten. */
-  CHECK_MSG(frames.size() == 9U,
-            "expected 9 frames to survive FEC; got " << frames.size());
+  CHECK_MSG(beacons == 10U, "expected all 10 beacons; got " << beacons);
+  CHECK_MSG(frames.size() == 10U,
+            "expected exactly the 10 real frames and nothing else; got " << frames.size());
 }

@@ -48,8 +48,11 @@ namespace hooks {
   extern std::vector<uint16_t> g_adcIn;
   extern size_t                g_adcInPtr;
 
-  /* Number of CIO::interrupt() calls, i.e. elapsed 24 kHz sample ticks. */
+  /* Number of CIO::interrupt() calls, i.e. elapsed sample ticks. */
   extern unsigned long g_ticks;
+
+  /* Last sample rate the firmware asked the hardware for. */
+  extern uint32_t g_sampleRate;
 
   /* PTT / DCD line state, as driven by setPTTInt() and setCOSInt(). */
   extern bool g_ptt;

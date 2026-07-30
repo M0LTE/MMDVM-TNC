@@ -29,7 +29,9 @@ m_rxBuffer(RX_RINGBUFFER_SIZE),
 m_txBuffer(TX_RINGBUFFER_SIZE),
 m_rxLevel(RX_LEVEL * 128),
 m_pPersist(P_PERSISTENCE),
+m_slotTime10ms(SLOT_TIME / 10U),
 m_slotTime((SLOT_TIME / 10U) * 240U),
+m_sampleRate(24000U),
 m_dcd(false),
 m_ledCount(0U),
 m_ledValue(true),
@@ -108,7 +110,7 @@ void CIO::process()
 #if defined(CONSTANT_SRV_LED)
   setLEDInt(true);
 #else
-  if (m_ledCount >= 24000U) {
+  if (m_ledCount >= m_sampleRate) {
     m_ledCount = 0U;
     m_ledValue = !m_ledValue;
     setLEDInt(m_ledValue);
@@ -156,6 +158,10 @@ void CIO::process()
         mode2RX.samples(samples, RX_BLOCK_SIZE);
         break;
 
+      case 3U:
+        mode3RX.samples(samples, RX_BLOCK_SIZE);
+        break;
+
       default:
         break;
     }
@@ -179,6 +185,15 @@ void CIO::write(q15_t* samples, uint16_t length)
 
 void CIO::showMode()
 {
+  // The sample clock follows the mode: modes 1 and 2 run the modem at 24 kHz,
+  // mode 3 at 48 kHz. Everything counted in samples has to follow it.
+  uint32_t rate = (m_mode == 3U) ? SAMPLE_RATE_HIGH : SAMPLE_RATE_LOW;
+  if (rate != m_sampleRate) {
+    m_sampleRate = rate;
+    m_slotTime   = m_slotTime10ms * 10U * (m_sampleRate / 1000U);
+    setSampleRateInt(rate);
+  }
+
 #if defined(MODE_LEDS)
   switch (m_mode) {
     case 1U:
@@ -191,6 +206,12 @@ void CIO::showMode()
       setMode1Int(false);
       setMode2Int(true);
       setMode3Int(false);
+      setMode4Int(false);
+      break;
+    case 3U:
+      setMode1Int(false);
+      setMode2Int(false);
+      setMode3Int(true);
       setMode4Int(false);
       break;
     default:
@@ -228,7 +249,8 @@ void CIO::setPPersist(uint8_t value)
 
 void CIO::setSlotTime(uint8_t value)
 {
-  m_slotTime = value * 240U;
+  m_slotTime10ms = value;
+  m_slotTime     = value * 10U * (m_sampleRate / 1000U);
 }
 
 bool CIO::canTX() const

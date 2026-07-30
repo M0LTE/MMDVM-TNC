@@ -31,6 +31,7 @@ endif
 
 # Portable firmware sources.
 FW_SRCS := Mode2RX.cpp Mode2TX.cpp \
+           Mode3RX.cpp Mode3TX.cpp \
            IL2PRX.cpp IL2PTX.cpp IL2PRS.cpp \
            AX25RX.cpp AX25TX.cpp AX25Frame.cpp AX25CRC.cpp \
            AX25Demodulator.cpp AX25Twist.cpp \

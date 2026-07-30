@@ -32,6 +32,7 @@ public:
 
   void encode(uint8_t* data, uint8_t* parity) const;
   int  decode(uint8_t* data, uint8_t* eras_pos) const;
+  int  decode(uint8_t* data, uint8_t* eras_pos, int no_eras) const;
 
 private:
   uint8_t        m_nroots;       /* Number of generator roots = number of parity symbols */
