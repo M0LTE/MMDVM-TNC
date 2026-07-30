@@ -1,8 +1,13 @@
 name: Host tests
 
+# Pull requests and master. Not every branch push -- the PR run is the one
+# that gates a merge.
 on:
-  push:
   pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
 
 jobs:
   tests:

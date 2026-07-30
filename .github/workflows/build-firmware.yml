@@ -1,0 +1,37 @@
+name: Build firmware
+
+# Master only, plus manual runs. Branch pushes are covered by the host test
+# suite; there is no point cross-compiling on every push to a topic branch.
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { name: nucleo, make: nucleo, hex: bin/mmdvm_f4.hex }
+          - { name: pi,     make: pi,     hex: bin/mmdvm_f4.hex }
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install the ARM toolchain
+        run: sudo apt-get update -qq && sudo apt-get install -qy gcc-arm-none-eabi
+
+      - name: Build ${{ matrix.target.name }}
+        run: make ${{ matrix.target.make }}
+
+      - name: Archive built firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmdvm-tnc-${{ matrix.target.name }}
+          path: ${{ matrix.target.hex }}
+          if-no-files-found: error
