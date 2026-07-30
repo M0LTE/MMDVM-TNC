@@ -44,6 +44,8 @@
 #include "Radio.h"
 #include "shim/TestHooks.h"
 
+#include <vector>
+
 TF_TEST(rx_filter_uses_a_legal_tap_count)
 {
   const std::vector<uint8_t> payload = radio::rawPayload(48U);
@@ -74,4 +76,66 @@ TF_TEST(rx_filter_still_passes_traffic)
     CHECK_MSG(radio::decodedExactly(radio::loopback(payload, ch), payload),
               "lost the packet at sampling phase " << phase);
   }
+}
+
+TF_TEST(rx_filter_leading_zero_computes_the_intended_convolution)
+{
+  /*
+   * The fix pads the designed 45 taps to an even 46 with a zero on the front.
+   * "Identical to before" is not a claim worth making, because before was not
+   * well defined -- CMSIS was reading a 46th coefficient from whatever
+   * followed the array. What can be shown is that the padded filter computes
+   * exactly the convolution the 45 designed taps describe.
+   *
+   * CMSIS runs coefficients against the state buffer oldest first:
+   *
+   *   y[n] = sum over j in [0, N) of c[j] * x[n - N + 1 + j]
+   *
+   * so with c = { 0, d0 .. d4 } and N = 6 that collapses to
+   *
+   *   y[n] = sum over k in [0, 5) of d[k] * x[n - 4 + k]
+   *
+   * which is the five tap design, no delay added.
+   */
+  const q15_t designed[5] = { 700, -2400, 9000, -2400, 700 };
+  q15_t       padded[6]   = { 0, 700, -2400, 9000, -2400, 700 };
+
+  q15_t state[16] = { 0 };
+
+  arm_fir_instance_q15 f;
+  f.numTaps = 6U;
+  f.pState  = state;
+  f.pCoeffs = padded;
+
+  std::vector<q15_t> history;
+  for (unsigned i = 0U; i < 4U; i++)
+    history.push_back(0);                 /* x[m] = 0 for m < 0 */
+
+  /* Two samples at a time, the block size the receiver actually uses. */
+  for (int block = 0; block < 32; block++) {
+    q15_t in[2];
+    in[0] = q15_t(((block * 37) % 19) * 700 - 6000);
+    in[1] = q15_t(((block * 11) % 23) * 500 - 5000);
+
+    q15_t out[2] = { 0, 0 };
+    ::arm_fir_fast_q15(&f, in, out, 2U);
+
+    for (unsigned s = 0U; s < 2U; s++) {
+      history.push_back(in[s]);
+
+      q31_t acc = 0;
+      const size_t n = history.size() - 1U;
+      for (unsigned k = 0U; k < 5U; k++)
+        acc += q31_t(history[n - 4U + k]) * q31_t(designed[k]);
+
+      const q15_t expected = q15_t(__SSAT(acc >> 15, 16));
+
+      CHECK_MSG(out[s] == expected,
+                "block " << block << " sample " << s << ": filter gave "
+                << int(out[s]) << ", the five tap design gives " << int(expected));
+    }
+  }
+
+  CHECK_EQ(int(armshim::g_oddTapCalls), 0);
+  CHECK_EQ(int(armshim::g_coeffOverrunReads), 0);
 }
