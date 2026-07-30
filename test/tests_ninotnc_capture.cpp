@@ -31,36 +31,49 @@
  *
  * WHAT THIS ESTABLISHES
  *
- * Sync detection and the IL2P header interoperate exactly. Offline analysis of
- * the capture confirms it independently of this firmware:
+ * This firmware decodes a real NinoTNC off air, end to end.
  *
- *   - MODE2_SYNC_SYMBOLS_VALUES matches the transmitted sync vector with 0 of
- *     16 symbols wrong, in every burst of both captures
- *   - the 15 byte header is a valid RS(15,13) codeword, syndromes zero, and
- *     decodes to a type 1 MaxFEC header declaring a 100 byte payload
+ * These captures replaced an earlier pair made with AGC enabled on the
+ * recorder. That AGC left the preamble and sync intact -- they are all +/-3
+ * symbols, so a compressor has nothing to act on -- and the 15 byte header
+ * survived too, but it wrecked 116 bytes of four level payload. Nino
+ * Carrillo's own decoder, pymodem, failed on those recordings in exactly the
+ * same place, which is what identified the recorder rather than the firmware.
  *
- * The payload block in these particular recordings does not decode. That is
- * NOT a fault in this firmware, and not an interoperability gap:
+ * Interoperability is now demonstrated in both directions:
  *
- *   - Nino Carrillo's own decoder, pymodem, fails on the same capture in the
- *     same place. It finds Syncword 0x5d57df7f, reads the header, then reports
- *     "IL2P SmallBlock Decode Fail" and returns no packets.
- *   - As a control, a frame from this firmware's own transmitter was put
- *     through pymodem's IL2P codec. It decoded first time, "Bytes Corrected: 0",
- *     recovering the callsigns, the UI control and PID bytes and the text
- *     intact. So this firmware's transmitter is IL2P conformant, and the
- *     symbol extraction used for the analysis above is sound.
- *   - Every RS and scrambler parameter matches pymodem exactly: first root 0,
- *     2 header roots, 16 block roots, GF polynomial 0x11D, LFSR polynomial
- *     0x211 seeded 0x1F0. So does the block sizing and the payload length
- *     field extraction.
+ *   - NinoTNC to here: sync detected on all ten transmissions, all ten IL2P
+ *     headers decode, and nine of the ten payloads come out with the beacon
+ *     text and callsigns intact.
+ *   - here to NinoTNC: a frame from this firmware's transmitter fed through
+ *     pymodem's IL2P codec decodes first time, "Bytes Corrected: 0".
  *
- * The conclusion is that the payload in these recordings is damaged, in a way
- * that spares the preamble and sync (all +/-3 symbols) and the short header,
- * but not 116 bytes of four level data. The damage is systematic rather than
- * random: bursts 0 and 2 slice to byte identical payloads. A recapture,
- * watching for clipping and for anything with AGC or compression in the path,
- * is the next step.
+ * WHAT IS STILL NOT RIGHT
+ *
+ * The receiver is spending most of its forward error correction just to get
+ * these frames out. Reed-Solomon corrections per payload block, on a clean,
+ * noiseless, AGC free capture, where the code can carry eight:
+ *
+ *     3  2  8  2  1  5  1  7  -1  7
+ *
+ * One frame in ten goes over. pymodem needs zero corrections on a comparable
+ * signal, so this is not inherent to the waveform.
+ *
+ * Sensitivity to a sample clock offset is the likely cause and is easy to
+ * measure. Resampling the capture and counting decodes:
+ *
+ *     -500ppm 0/10   -250ppm 1/10   0ppm 9/10
+ *     +250ppm 9/10   +500ppm 7/10   +1000ppm 0/10
+ *
+ * That is a usable window of roughly 500 ppm, and it is not centred on zero.
+ * Mode2RX has no symbol clock tracking at all: correlateSync() fixes the
+ * sampling instant once and samplesToBits() then steps a constant
+ * MODE2_RADIO_SYMBOL_LENGTH for the whole frame, so any difference between
+ * the transmitter's symbol clock and the receiver's ADC clock accumulates
+ * across 464 payload symbols with nothing pulling it back.
+ *
+ * The tests below assert what the receiver does today. The nine of ten figure
+ * is a statement of the current state, not a target.
   */
 
 #include "Config.h"
@@ -175,12 +188,40 @@ TF_TEST(ninotnc_9600_header_decodes_across_a_range_of_receive_levels)
   }
 }
 
-TF_TEST(ninotnc_9600_undecodable_payload_is_not_passed_to_the_host)
+TF_TEST(ninotnc_9600_frames_decode_end_to_end)
+{
+  /* The whole point: real off-air frames from an independent implementation,
+     all the way out to KISS. */
+  const std::vector<uint16_t> adc = capture(NOMINAL_PEAK);
+  REQUIRE(!adc.empty());
+
+  const std::vector<std::vector<uint8_t> > frames = radio::demodulate(adc);
+
+  unsigned beacons = 0U;
+  for (size_t i = 0U; i < frames.size(); i++) {
+    const std::string body(frames[i].begin() + 1, frames[i].end());
+    if (body.find("Beacon from M0LTE") != std::string::npos)
+      beacons++;
+  }
+
+  CHECK_MSG(beacons >= 9U,
+            "expected at least 9 of the 10 beacons; got " << beacons
+            << " from " << frames.size() << " decode(s)");
+
+  /* The AX.25 addresses have to survive the IL2P type 1 translation too. */
+  REQUIRE(!frames.empty());
+  const std::vector<uint8_t>& f = frames[0];
+  REQUIRE(f.size() > 16U);
+  CHECK_EQ(int(f[15]), int(0x03U));            /* UI */
+  CHECK_EQ(int(f[16]), int(0xF0U));            /* no layer 3 */
+}
+
+TF_TEST(ninotnc_9600_a_payload_that_fails_fec_is_not_passed_to_the_host)
 {
   /*
-   * The payload in these recordings is damaged -- pymodem cannot read it
-   * either. What must not happen is the receiver handing the host a frame it
-   * could not decode.
+   * One of the ten payloads still exceeds what the Reed-Solomon code can
+   * carry. What must not happen is the receiver handing that frame to the
+   * host anyway.
    *
    * The Reed-Solomon decoder returns -1 for this block. Until that negative
    * return was honoured it was read as success and the corrupt payload went on
@@ -193,9 +234,10 @@ TF_TEST(ninotnc_9600_undecodable_payload_is_not_passed_to_the_host)
   const std::vector<std::vector<uint8_t> > frames = radio::demodulate(adc);
 
   CHECK_MSG(hooks::debugContains("payload is invalid"),
-            "expected the undecodable payload to be reported as invalid");
+            "expected the over-budget payload to be reported as invalid");
 
-  CHECK_MSG(frames.empty(),
-            "a frame whose payload failed FEC was passed to the host: "
-            << frames.size() << " frame(s)");
+  /* Ten transmissions, ten headers, and one payload the code cannot carry --
+     so nine frames reach the host, not ten. */
+  CHECK_MSG(frames.size() == 9U,
+            "expected 9 frames to survive FEC; got " << frames.size());
 }
