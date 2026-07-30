@@ -30,7 +30,9 @@ jobs:
       # header layouts chosen, and stock Config.h has both commented out.
       - name: Select the Nucleo header layout
         if: matrix.target.name == 'nucleo'
-        run: sed -i 's|^// #define STM32F4_NUCLEO_MORPHO_HEADER|#define STM32F4_NUCLEO_MORPHO_HEADER|' Config.h
+        run: |
+          sed -i 's|^// #define STM32F4_NUCLEO_MORPHO_HEADER|#define STM32F4_NUCLEO_MORPHO_HEADER|' Config.h
+          grep -q '^#define STM32F4_NUCLEO_MORPHO_HEADER' Config.h
 
       - name: Build ${{ matrix.target.name }}
         run: make ${{ matrix.target.make }}
