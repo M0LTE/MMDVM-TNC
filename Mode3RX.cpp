@@ -95,7 +95,14 @@ const int32_t TIMING_RATE_SPAN   = 24;     // ~ +/-590 ppm
 const int32_t TIMING_PHASE_STEP  = TIMING_ONE_SAMPLE / 16;
 const int32_t TIMING_PHASE_SPAN  = 32;     // +/- two whole samples
 // How many of the best scored candidates get a Reed-Solomon attempt.
-const uint8_t TIMING_ATTEMPTS    = 200U;
+const uint8_t TIMING_ATTEMPTS    = 24U;
+
+// Scratch for the payload search. File scope rather than stack: the decode
+// runs in the main loop with a 2 KB stack reservation on target, and these
+// come to over four kilobytes.
+static uint8_t  s_frame[1023U + (5U * MODE3_PAYLOAD_PARITY_BYTES)];
+static uint8_t  s_alt[1023U + (5U * MODE3_PAYLOAD_PARITY_BYTES)];
+static uint16_t s_margins[1023U + (5U * MODE3_PAYLOAD_PARITY_BYTES)];
 // Header phase candidates: the full phase span at the nominal rate.
 const uint8_t HEADER_CANDIDATES  = uint8_t(2 * TIMING_PHASE_SPAN + 1);
 
@@ -264,9 +271,7 @@ void CMode3RX::processHeader(q15_t sample)
 void CMode3RX::processPayload(q15_t sample)
 {
   if (m_dataPtr == m_endPtr) {
-    uint8_t frame[1023U + (5U * MODE3_PAYLOAD_PARITY_BYTES)];
-
-    bool ok = decodePayload(frame);
+    bool ok = decodePayload(s_frame);
     if (ok) {
       DEBUG1("Mode3RX: payload and CRC are valid");
 
@@ -914,8 +919,8 @@ bool CMode3RX::decodePayload(uint8_t* frame)
         // was decided by less than the difference between the models, which
         // makes it a better erasure candidate than any margin threshold; the
         // remaining erasure budget goes to the lowest margins.
-        uint16_t margins[1023U + 5U * MODE3_PAYLOAD_PARITY_BYTES];
-        uint8_t  alt[1023U + 5U * MODE3_PAYLOAD_PARITY_BYTES];
+        uint16_t* margins = s_margins;
+        uint8_t*  alt     = s_alt;
 
         const uint16_t nbytes = nsym / 4U;
         for (uint16_t k = 0U; k < nbytes; k++)
