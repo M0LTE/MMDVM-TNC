@@ -119,6 +119,26 @@ namespace radio {
      type byte) equals `payload`. */
   bool decodedExactly(const std::vector<std::vector<uint8_t> >& frames, const std::vector<uint8_t>& payload);
 
+  /* ---- recorded captures ---------------------------------------------- *
+   *
+   * Feeding a recording of a different implementation is the only way to
+   * check the receiver against anything other than this firmware's own
+   * transmitter. modulate() and demodulate() share every assumption in this
+   * repo; a capture does not.
+   */
+
+  /* Mono 16 bit PCM only, which is what a sound card gives you. */
+  std::vector<int16_t> loadWav(const char* path, unsigned& sampleRate);
+
+  /* Integer decimation with a lowpass first, for getting a 48 kHz capture
+     down to the 24 kHz the mode 2 receiver runs at. */
+  std::vector<int16_t> decimate(const std::vector<int16_t>& in, unsigned factor);
+
+  /* Scale into the 12 bit ADC domain, putting the waveform's peak
+     `peakCounts` either side of mid rail. The firmware's own transmitter
+     produces about 695. */
+  std::vector<uint16_t> toAdc(const std::vector<int16_t>& in, int peakCounts);
+
 }
 
 #endif
