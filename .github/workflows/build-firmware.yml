@@ -1,0 +1,45 @@
+name: Build firmware
+
+# Master only, plus manual runs. Branch pushes are covered by the host test
+# suite; there is no point cross-compiling on every push to a topic branch.
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { name: nucleo, make: nucleo }
+          - { name: pi,     make: pi }
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install the ARM toolchain
+        run: sudo apt-get update -qq && sudo apt-get install -qy gcc-arm-none-eabi
+
+      # IOPins.h refuses to compile for the Nucleo without one of the two
+      # header layouts chosen, and stock Config.h has both commented out.
+      - name: Select the Nucleo header layout
+        if: matrix.target.name == 'nucleo'
+        run: |
+          sed -i 's|^// #define STM32F4_NUCLEO_MORPHO_HEADER|#define STM32F4_NUCLEO_MORPHO_HEADER|' Config.h
+          grep -q '^#define STM32F4_NUCLEO_MORPHO_HEADER' Config.h
+
+      - name: Build ${{ matrix.target.name }}
+        run: make ${{ matrix.target.make }}
+
+      - name: Archive built firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmdvm-tnc-${{ matrix.target.name }}
+          path: bin/mmdvm_f4.hex
+          if-no-files-found: error
