@@ -66,6 +66,7 @@ m_centre(),
 m_centreVal(0),
 m_threshold(),
 m_thresholdVal(0),
+m_averagePtr(NOAVEPTR),
 m_countdown(0U),
 m_packet()
 {

@@ -280,12 +280,13 @@ namespace radio {
     dst.insert(dst.end(), src.begin(), src.end());
   }
 
-  std::vector<std::vector<uint8_t> > demodulate(const std::vector<uint16_t>& adc)
+  std::vector<std::vector<uint8_t> > demodulate(const std::vector<uint16_t>& adc, bool resetReceiver)
   {
     m_mode = 2U;
     m_tx   = false;
 
-    mode2RX.reset();
+    if (resetReceiver)
+      mode2RX.reset();
 
     hooks::g_kissTx.clear();
     hooks::g_debugTx.clear();

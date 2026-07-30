@@ -101,8 +101,11 @@ namespace radio {
   void                  append(std::vector<uint16_t>& dst, const std::vector<uint16_t>& src);
 
   /* Returns the KISS frames the firmware emitted, each still carrying its
-     leading type/address byte. */
-  std::vector<std::vector<uint8_t> > demodulate(const std::vector<uint16_t>& adc);
+     leading type/address byte.
+     resetReceiver false leaves mode2RX exactly as the constructor left it,
+     which is what a freshly powered modem sees for its first ever packet. */
+  std::vector<std::vector<uint8_t> > demodulate(const std::vector<uint16_t>& adc,
+                                                bool resetReceiver = true);
 
   /* modulate -> channel -> demodulate, for the common case. */
   std::vector<std::vector<uint8_t> > loopback(const std::vector<uint8_t>& payload, const Channel& ch);

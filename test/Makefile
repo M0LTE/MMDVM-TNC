@@ -18,6 +18,7 @@ OBJ := build
 
 CXX      ?= g++
 CXXFLAGS ?= -std=c++11 -g -O1
+DEPFLAGS := -MMD -MP
 WARNINGS := -Wall -Wextra -Wno-unused-parameter -Wno-reorder -Wno-unused-variable \
             -Wno-unused-but-set-variable -Wno-sign-compare
 INCLUDES := -I. -Ishim -I$(FW)
@@ -61,15 +62,15 @@ $(BIN): $(FW_OBJS) $(MAIN_OBJ) $(TEST_OBJS)
 
 $(OBJ)/fw_MMDVM.o: $(FW)/MMDVM.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(WARNINGS) $(INCLUDES) $(DEFINES) -Dmain=mmdvm_main_unused -c -o $@ $<
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(WARNINGS) $(INCLUDES) $(DEFINES) -Dmain=mmdvm_main_unused -c -o $@ $<
 
 $(OBJ)/fw_%.o: $(FW)/%.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(WARNINGS) $(INCLUDES) $(DEFINES) -c -o $@ $<
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(WARNINGS) $(INCLUDES) $(DEFINES) -c -o $@ $<
 
 $(OBJ)/%.o: %.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(WARNINGS) $(INCLUDES) $(DEFINES) -c -o $@ $<
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) $(WARNINGS) $(INCLUDES) $(DEFINES) -c -o $@ $<
 
 run: $(BIN)
 	@./$(BIN) $(ARGS)
@@ -81,3 +82,6 @@ valgrind: $(BIN)
 
 clean:
 	@rm -rf $(OBJ)
+
+# Header dependencies, so editing a header rebuilds what included it.
+-include $(FW_OBJS:.o=.d) $(MAIN_OBJ:.o=.d) $(TEST_OBJS:.o=.d)
