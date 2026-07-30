@@ -1,12 +1,9 @@
 name: Host tests
 
-# Pull requests and master. Not every branch push -- the PR run is the one
-# that gates a merge.
+# Pull requests only: pushes to master run the full test, build and release
+# pipeline in build-firmware.yml.
 on:
   pull_request:
-  push:
-    branches:
-      - master
   workflow_dispatch:
 
 jobs:
