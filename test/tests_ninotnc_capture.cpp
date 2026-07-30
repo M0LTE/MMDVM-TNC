@@ -29,7 +29,7 @@
  * Captures made with tnc-tools kiss-ax25-ui-batch.py: ten 100 byte AX.25 UI
  * frames carrying "Beacon from M0LTE" with an incrementing counter.
  *
- * WHAT INTEROPERATES AND WHAT DOES NOT
+ * WHAT THIS ESTABLISHES
  *
  * Sync detection and the IL2P header interoperate exactly. Offline analysis of
  * the capture confirms it independently of this firmware:
@@ -39,15 +39,29 @@
  *   - the 15 byte header is a valid RS(15,13) codeword, syndromes zero, and
  *     decodes to a type 1 MaxFEC header declaring a 100 byte payload
  *
- * The payload block does not. Its codeword does not validate under this
- * firmware's assumptions, and an offline search over start offset, block
- * length, 16/24/32/48 RS roots, first-consecutive-root 0 and 1, scrambler
- * ordering, and symbol rate within +/-0.4% found no combination that makes it
- * one. So the two agree on the physical layer and the header, and diverge on
- * the payload FEC. Running that down needs Nino's IL2P specification rather
- * than more guessing, so these tests assert what has been established and no
- * more.
- */
+ * The payload block in these particular recordings does not decode. That is
+ * NOT a fault in this firmware, and not an interoperability gap:
+ *
+ *   - Nino Carrillo's own decoder, pymodem, fails on the same capture in the
+ *     same place. It finds Syncword 0x5d57df7f, reads the header, then reports
+ *     "IL2P SmallBlock Decode Fail" and returns no packets.
+ *   - As a control, a frame from this firmware's own transmitter was put
+ *     through pymodem's IL2P codec. It decoded first time, "Bytes Corrected: 0",
+ *     recovering the callsigns, the UI control and PID bytes and the text
+ *     intact. So this firmware's transmitter is IL2P conformant, and the
+ *     symbol extraction used for the analysis above is sound.
+ *   - Every RS and scrambler parameter matches pymodem exactly: first root 0,
+ *     2 header roots, 16 block roots, GF polynomial 0x11D, LFSR polynomial
+ *     0x211 seeded 0x1F0. So does the block sizing and the payload length
+ *     field extraction.
+ *
+ * The conclusion is that the payload in these recordings is damaged, in a way
+ * that spares the preamble and sync (all +/-3 symbols) and the short header,
+ * but not 116 bytes of four level data. The damage is systematic rather than
+ * random: bursts 0 and 2 slice to byte identical payloads. A recapture,
+ * watching for clipping and for anything with AGC or compression in the path,
+ * is the next step.
+  */
 
 #include "Config.h"
 #include "Globals.h"
@@ -164,9 +178,9 @@ TF_TEST(ninotnc_9600_header_decodes_across_a_range_of_receive_levels)
 TF_TEST(ninotnc_9600_undecodable_payload_is_not_passed_to_the_host)
 {
   /*
-   * The payload FEC does not currently interoperate, which is a real gap. The
-   * thing that must not happen meanwhile is the receiver handing the host a
-   * frame it could not decode.
+   * The payload in these recordings is damaged -- pymodem cannot read it
+   * either. What must not happen is the receiver handing the host a frame it
+   * could not decode.
    *
    * The Reed-Solomon decoder returns -1 for this block. Until that negative
    * return was honoured it was read as success and the corrupt payload went on
