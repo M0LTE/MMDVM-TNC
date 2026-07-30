@@ -310,7 +310,13 @@ bool CMode2RX::correlateSync()
       if (startPtr >= MODE2_MAX_LENGTH_SAMPLES)
         startPtr -= MODE2_MAX_LENGTH_SAMPLES;
 
-      uint16_t endPtr = m_dataPtr;
+      // samplesToBits() stops short of endPtr, so this has to be one symbol
+      // past the last sync symbol, which sits at m_dataPtr. Stopping at
+      // m_dataPtr converts only 15 of the 16 symbols and leaves the bottom
+      // two bits of sync[] never written.
+      uint16_t endPtr = m_dataPtr + MODE2_RADIO_SYMBOL_LENGTH;
+      if (endPtr >= MODE2_MAX_LENGTH_SAMPLES)
+        endPtr -= MODE2_MAX_LENGTH_SAMPLES;
 
       uint8_t sync[MODE2_SYNC_LENGTH_BYTES];
       samplesToBits(startPtr, endPtr, sync);
