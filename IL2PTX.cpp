@@ -113,6 +113,11 @@ uint16_t CIL2PTX::process(const uint8_t* in, uint16_t inLength, uint8_t* out)
 
 bool CIL2PTX::isIL2PType1(const uint8_t* frame, uint16_t length) const
 {
+  // Too short to hold the AX.25 address block and control byte this header
+  // translates? Every test below reads those fields.
+  if (length < 15U)
+    return false;
+
   // Has any digipeaters?
   if ((frame[13U] & 0x01U) == 0x00U)
     return false;
@@ -123,6 +128,10 @@ bool CIL2PTX::isIL2PType1(const uint8_t* frame, uint16_t length) const
 
   // Has untranslatable PID?
   if ((frame[14U] & 0x01U) == 0x00U || (frame[14U] & 0xEFU) == 0x03U) {	// I or UI frames
+    // An I or UI frame with no room for its PID byte cannot be translated
+    if (length < 16U)
+      return false;
+
     bool found = false;
 
     for (std::size_t i = 0; i < (sizeof(IL2P_PIDS) / sizeof(struct IL2P_PID)); i++) {

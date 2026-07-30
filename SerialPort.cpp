@@ -94,6 +94,16 @@ void CSerialPort::process()
         m_ptr       = 0U;
       }
     } else {
+      // A frame that has outgrown the buffer can only be garbage. Abandon it,
+      // and everything up to its closing FEND, rather than writing past the
+      // end of m_buffer.
+      if (m_ptr >= sizeof(m_buffer) && c != KISS_FEND) {
+        m_inFrame   = false;
+        m_isEscaped = false;
+        m_ptr       = 0U;
+        continue;
+      }
+
       // Any other bytes are added to the buffer-ish
       switch (c) {
         case KISS_TFESC:
@@ -108,9 +118,11 @@ void CSerialPort::process()
           m_isEscaped = true;
           break;
         case KISS_FEND:
+          // The end of one frame is also the start of the next: repeated
+          // FENDs collapse, so stray or flushing FENDs cannot make the
+          // parser eat the frame that follows them.
           if (m_ptr > 0U)
             processMessage();
-          m_inFrame   = false;
           m_isEscaped = false;
           m_ptr       = 0U;
           break;

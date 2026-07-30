@@ -97,8 +97,16 @@ namespace radio {
   /* Build the on-air waveform for one packet. txDelay is in units of 10 ms of
      preamble, matching the KISS TX Delay parameter; the default keeps the
      tests short while leaving the receive filter plenty of time to settle.
-     mode selects the transmitter: 2 gives 24 kHz samples, 3 gives 48 kHz. */
+     mode selects the transmitter: 1 gives 1200 baud AFSK at 24 kHz, 2 gives
+     24 kHz C4FSK samples, 3 gives 48 kHz. */
   std::vector<uint16_t> modulate(const uint8_t* payload, uint16_t length, uint8_t txDelay = 3U, uint8_t mode = 2U);
+
+  /* Run the given mode's transmitter until the DAC goes quiet and return the
+     waveform it produced. For when the transmission was queued by something
+     other than this file -- a KISS frame fed through serial.process(), say --
+     so modulate() cannot be used. Returns an empty vector if nothing was
+     transmitted. */
+  std::vector<uint16_t> runTX(uint8_t mode = 2U);
 
   std::vector<uint16_t> applyChannel(const std::vector<uint16_t>& in, const Channel& ch);
 
