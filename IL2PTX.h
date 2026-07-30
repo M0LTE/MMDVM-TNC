@@ -25,6 +25,15 @@
 
 #include <cstdint>
 
+// The header's payload byte count is a ten bit field; anything longer cannot
+// be labelled and would go on the air with a wrapped count.
+const uint16_t IL2P_MAX_PAYLOAD_LENGTH = 1023U;
+
+// What the longest payload encodes to: a 15 byte protected header, the
+// payload, sixteen parity symbols for each of its five blocks, and the four
+// byte trailing CRC. 15 + 1023 + 80 + 4.
+const uint16_t IL2P_MAX_ENCODED_LENGTH = 1122U;
+
 class CIL2PTX {
 public:
   CIL2PTX();

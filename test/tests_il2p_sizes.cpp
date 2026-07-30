@@ -83,3 +83,41 @@ TF_TEST(mode2_carries_the_largest_il2p_frame_over_the_air)
   radio::Channel ch;
   CHECK(radio::decodedExactly(radio::loopback(payload, ch), payload));
 }
+
+TF_TEST(transmitters_reject_a_payload_too_long_for_il2p)
+{
+  /* The header's byte count is a ten bit field. A 1024 byte payload would go
+     on the air labelled as 0 bytes, so it has to be refused at the door --
+     and quietly overflowing the encode buffer would be worse still. */
+  const std::vector<uint8_t> tooLong = radio::rawPayload(1024U);
+
+  CHECK_EQ(int(mode2TX.writeData(&tooLong[0], 1024U)), 4);
+  CHECK_EQ(int(mode3TX.writeData(&tooLong[0], 1024U)), 4);
+
+  /* The largest legal payload is still accepted. */
+  CHECK_EQ(int(mode2TX.writeData(&tooLong[0], 1023U)), 0);
+  CHECK_EQ(int(mode3TX.writeData(&tooLong[0], 1023U)), 0);
+}
+
+TF_TEST(mode2_maximum_tx_delay_carries_the_largest_frame)
+{
+  /* TX delay 255 is 3060 bytes of preamble before the frame even starts;
+     with the largest payload behind it the whole burst has to fit in the
+     transmitter's FIFO, which used to hold only 3000 bytes and silently tore
+     the frame. */
+  const std::vector<uint8_t> payload = radio::rawPayload(1023U);
+
+  const std::vector<uint16_t> wave = radio::modulate(&payload[0], 1023U, 255U);
+  REQUIRE_MSG(wave.size() > 80000U, "burst is only " << wave.size() << " samples");
+
+  radio::Channel ch;
+  CHECK(radio::decodedExactly(radio::demodulate(radio::applyChannel(wave, ch)), payload));
+}
+
+TF_TEST(mode3_maximum_tx_delay_and_largest_frame_fit_the_fifo)
+{
+  const std::vector<uint8_t> payload = radio::rawPayload(1023U);
+
+  mode3TX.setTXDelay(255U);
+  CHECK_EQ(int(mode3TX.writeData(&payload[0], 1023U)), 0);
+}
