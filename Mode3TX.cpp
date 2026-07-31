@@ -178,9 +178,13 @@ uint8_t CMode3TX::writeData(const uint8_t* data, uint16_t length)
 
 uint8_t CMode3TX::writeDataAck(uint16_t token, const uint8_t* data, uint16_t length)
 {
-  m_tokens.add(token);
+  // Only remember the token if the packet was actually accepted: acking a
+  // frame that was never transmitted is a lie the host acts on.
+  uint8_t rc = writeData(data, length);
+  if (rc == 0U)
+    m_tokens.add(token);
 
-  return writeData(data, length);
+  return rc;
 }
 
 void CMode3TX::writeByte(uint8_t c)
