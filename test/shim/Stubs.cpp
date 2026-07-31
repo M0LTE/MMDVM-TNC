@@ -38,6 +38,7 @@ namespace hooks {
   std::vector<uint16_t> g_adcIn;
   size_t                g_adcInPtr  = 0U;
   unsigned long         g_ticks     = 0UL;
+  bool                  g_bootloaderRequested = false;
   uint32_t              g_sampleRate = 24000U;
   bool                  g_ptt       = false;
   bool                  g_dcd       = false;
@@ -54,6 +55,7 @@ namespace hooks {
     g_ticks     = 0UL;
     g_ptt       = false;
     g_dcd       = false;
+    g_bootloaderRequested = false;
   }
 
   std::vector<std::vector<uint8_t> > kissFrames()
@@ -101,6 +103,19 @@ namespace hooks {
     return g_debugTx.find(needle) != std::string::npos;
   }
 
+}
+
+/* --------------------------------------------------------- Bootloader ---- */
+
+/* On target these live in Bootloader.cpp and jump into the STM32 ROM. */
+
+void requestBootloader()
+{
+  hooks::g_bootloaderRequested = true;
+}
+
+void checkBootloader()
+{
 }
 
 /* ---------------------------------------------------------------- CIO ---- */

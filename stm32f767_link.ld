@@ -103,6 +103,16 @@ SECTIONS
 		_edata = . ;       /* End address for the .data section */
 	} > RAM
 
+	/* Survives a software reset: not loaded, and excluded from the
+	   startup zeroing of .bss. Bootloader.cpp keeps its reboot request
+	   here. */
+	.noinit (NOLOAD) :
+	{
+		. = ALIGN(4);
+		*(.noinit)
+		. = ALIGN(4);
+	} > RAM
+
 	/* The .bss section (uninitialized data) */
 	.bss :
 	{

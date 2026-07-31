@@ -37,5 +37,11 @@ const uint8_t KISS_TYPE_DATA_WITH_ACK  = 0x0CU;
 const uint8_t KISS_TYPE_ACK            = 0x0CU;
 const uint8_t KISS_TYPE_POLL           = 0x0EU;
 
+// Nonstandard, this firmware only: reboot into the STM32 ROM bootloader for
+// reflashing over the same serial port. The frame must carry the ASCII
+// payload "BOOT"; 0x0B avoids everything BPQ (0x0C, 0x0E) and QTSM (0x07)
+// use.
+const uint8_t KISS_TYPE_BOOTLOADER     = 0x0BU;
+
 #endif
 
