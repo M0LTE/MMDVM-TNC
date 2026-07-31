@@ -24,6 +24,7 @@
 
 #include "RingBuffer.h"
 #include "TokenStore.h"
+#include "Utils.h"
 
 #include "framework.h"
 
@@ -121,6 +122,28 @@ TF_TEST(ringbuffer_peek_shows_the_next_item_without_taking_it)
 
   rb.get(out);
   CHECK_EQ(int(rb.peek()), 0x22);
+}
+
+TF_TEST(countbits_matches_known_answers)
+{
+  /* countBits16 sits inside the sync correlator's error budget arithmetic;
+     an off by one here is a receiver that is too strict or too loose. */
+  CHECK_EQ(int(countBits8(0x00U)), 0);
+  CHECK_EQ(int(countBits8(0xFFU)), 8);
+  CHECK_EQ(int(countBits8(0xA5U)), 4);
+
+  CHECK_EQ(int(countBits16(0x0000U)), 0);
+  CHECK_EQ(int(countBits16(0xFFFFU)), 16);
+  CHECK_EQ(int(countBits16(0xA5A5U)), 8);
+  CHECK_EQ(int(countBits16(0x8001U)), 2);
+
+  CHECK_EQ(int(countBits32(0x00000000U)), 0);
+  CHECK_EQ(int(countBits32(0xFFFFFFFFU)), 32);
+  CHECK_EQ(int(countBits32(0xA5A5A5A5U)), 16);
+
+  CHECK_EQ(int(countBits64(0ULL)), 0);
+  CHECK_EQ(int(countBits64(~0ULL)), 64);
+  CHECK_EQ(int(countBits64(0xA5A5A5A5A5A5A5A5ULL)), 32);
 }
 
 TF_TEST(tokenstore_capacity_iteration_reset_and_clear)

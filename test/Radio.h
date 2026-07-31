@@ -110,6 +110,12 @@ namespace radio {
 
   std::vector<uint16_t> applyChannel(const std::vector<uint16_t>& in, const Channel& ch);
 
+  /* Resample the waveform as a receiver whose sample clock is off by `ppm`
+     would see it, by linear interpolation. Transmit and receive oscillators
+     are never the same frequency on real hardware; a positive value makes
+     the receiver's clock fast, so the burst appears stretched. */
+  std::vector<uint16_t> applyClockError(const std::vector<uint16_t>& in, int ppm);
+
   /* Concatenate bursts with `gapSamples` of silence between them. */
   std::vector<uint16_t> silence(size_t samples);
   void                  append(std::vector<uint16_t>& dst, const std::vector<uint16_t>& src);
