@@ -339,6 +339,30 @@ TF_TEST(kiss_data_with_ack_acks_only_after_transmission)
   CHECK_EQ(int(frames[0][2]), 0x34);
 }
 
+TF_TEST(kiss_rejected_data_with_ack_is_never_acked)
+{
+  /* A DATA_WITH_ACK the transmitter refuses -- here a payload over IL2P's
+     1023 byte limit -- must not be acked: the ack means "transmitted", and
+     the host deletes its copy on the strength of it. */
+  const std::vector<uint8_t> payload = radio::rawPayload(1200U);
+
+  std::vector<uint8_t> content;
+  content.push_back(0x12U);
+  content.push_back(0x34U);
+  content.insert(content.end(), payload.begin(), payload.end());
+
+  feed(kissEncode(KISS_TYPE_DATA_WITH_ACK, content));
+
+  for (unsigned t = 0U; t < 24000U * 3U; t++) {
+    io.interrupt();
+    io.process();
+    mode2TX.process();
+  }
+
+  CHECK(!hooks::g_ptt);
+  CHECK_EQ(int(hooks::kissFrames().size()), 0);
+}
+
 TF_TEST(kiss_oversized_frame_is_dropped_and_the_parser_recovers)
 {
   /* The parser's buffer is 2000 bytes. A frame bigger than that -- line

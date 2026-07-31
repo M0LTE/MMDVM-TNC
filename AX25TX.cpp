@@ -106,18 +106,44 @@ void CAX25TX::process()
 
 uint8_t CAX25TX::writeData(const uint8_t* data, uint16_t length)
 {
+  // CAX25Frame would silently truncate a longer frame, and the CRC is added
+  // after the truncation -- the result would be a valid frame with content
+  // missing, which the far end has no way to detect.
+  if (length > (AX25_MAX_PACKET_LEN - 2U)) {
+    DEBUG2("AX25TX: frame is too long", length);
+    return 4U;
+  }
+
+  const bool idle = (m_poLen == 0U);
+
+  // Worst case bits this packet can add: two flags, the frame with its CRC,
+  // and one stuffed bit for every five. Anything that does not fit whole is
+  // refused whole; a partial frame on the air is worse than a dropped one.
+  const uint32_t frameBits = (uint32_t(length) + 2U) * 8U;
+  const uint32_t needed    = 16U + frameBits + frameBits / 5U + (idle ? m_txDelay : 0U);
+
+  if ((uint32_t(m_poLen) + needed) > (sizeof(m_poBuffer) * 8U)) {
+    DEBUG1("AX25TX: no space for the packet");
+    return 5U;
+  }
+
   CAX25Frame frame(data, length);
   frame.addCRC();
 
-  m_poLen    = 0U;
-  m_poPtr    = 0U;
-  m_nrzi     = false;
-  m_tablePtr = 0U;
+  // A packet handed over mid transmission is appended after the frame going
+  // out, with the NRZI state carrying straight on -- it used to reset the
+  // buffer instead, corrupting the frame on the air. The preamble is only
+  // for a transmitter starting from idle.
+  if (idle) {
+    m_poPtr    = 0U;
+    m_nrzi     = false;
+    m_tablePtr = 0U;
 
-  // Add TX delay
-  for (uint16_t i = 0U; i < m_txDelay; i++, m_poLen++) {
-    bool preamble = NRZI(false);
-    WRITE_BIT1(m_poBuffer, m_poLen, preamble);
+    // Add TX delay
+    for (uint16_t i = 0U; i < m_txDelay; i++, m_poLen++) {
+      bool preamble = NRZI(false);
+      WRITE_BIT1(m_poBuffer, m_poLen, preamble);
+    }
   }
 
   // Add the Start Flag
@@ -160,9 +186,13 @@ uint8_t CAX25TX::writeData(const uint8_t* data, uint16_t length)
 
 uint8_t CAX25TX::writeDataAck(uint16_t token, const uint8_t* data, uint16_t length)
 {
-  m_tokens.push_back(token);
+  // Only remember the token if the packet was actually accepted: acking a
+  // frame that was never transmitted is a lie the host acts on.
+  uint8_t rc = writeData(data, length);
+  if (rc == 0U)
+    m_tokens.push_back(token);
 
-  return writeData(data, length);
+  return rc;
 }
 
 void CAX25TX::writeBit(bool b)

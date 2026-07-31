@@ -313,6 +313,31 @@ namespace radio {
     return out;
   }
 
+  std::vector<uint16_t> applyClockError(const std::vector<uint16_t>& in, int ppm)
+  {
+    if (in.size() < 2U)
+      return in;
+
+    /* Reading the input at a step of 1 - ppm/1e6 stretches (positive ppm)
+       or squeezes the waveform relative to the receiver's clock. */
+    const double step = 1.0 - double(ppm) * 1e-6;
+
+    std::vector<uint16_t> out;
+    out.reserve(in.size() + 16U);
+
+    double pos = 0.0;
+    while (pos < double(in.size() - 1U)) {
+      const size_t i = size_t(pos);
+      const double f = pos - double(i);
+      const double v = double(in[i]) * (1.0 - f) + double(in[i + 1U]) * f;
+
+      out.push_back(uint16_t(v + 0.5));
+      pos += step;
+    }
+
+    return out;
+  }
+
   std::vector<uint16_t> silence(size_t samples)
   {
     return std::vector<uint16_t>(samples, MID);
