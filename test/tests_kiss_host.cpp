@@ -231,7 +231,7 @@ TF_TEST(kiss_command_with_the_wrong_length_is_ignored)
 
 TF_TEST(kiss_unknown_frame_type_is_reported)
 {
-  feed(kissEncode(0x0BU, std::vector<uint8_t>()));
+  feed(kissEncode(0x0FU, std::vector<uint8_t>()));
 
   CHECK(hooks::debugContains("Unhandled KISS frame type"));
 }
@@ -361,6 +361,34 @@ TF_TEST(kiss_rejected_data_with_ack_is_never_acked)
 
   CHECK(!hooks::g_ptt);
   CHECK_EQ(int(hooks::kissFrames().size()), 0);
+}
+
+TF_TEST(kiss_bootloader_reboot_needs_the_exact_magic)
+{
+  /* A reboot into the ROM bootloader takes the modem off the air until it
+     is reflashed or reset, so nothing short of the exact frame may trigger
+     it -- not a near miss, not a truncation, not line noise. */
+  std::vector<uint8_t> magic;
+  magic.push_back('B');
+  magic.push_back('O');
+  magic.push_back('O');
+  magic.push_back('T');
+
+  std::vector<uint8_t> wrong = magic;
+  wrong[3] = 'S';
+  feed(kissEncode(KISS_TYPE_BOOTLOADER, wrong));
+  CHECK(!hooks::g_bootloaderRequested);
+
+  feed(kissEncode(KISS_TYPE_BOOTLOADER, std::vector<uint8_t>(magic.begin(), magic.begin() + 3)));
+  CHECK(!hooks::g_bootloaderRequested);
+
+  std::vector<uint8_t> longer = magic;
+  longer.push_back('!');
+  feed(kissEncode(KISS_TYPE_BOOTLOADER, longer));
+  CHECK(!hooks::g_bootloaderRequested);
+
+  feed(kissEncode(KISS_TYPE_BOOTLOADER, magic));
+  CHECK(hooks::g_bootloaderRequested);
 }
 
 TF_TEST(kiss_oversized_frame_is_dropped_and_the_parser_recovers)

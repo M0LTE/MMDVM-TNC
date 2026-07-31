@@ -76,5 +76,11 @@ extern CMode2RX mode2RX;
 extern CMode3TX mode3TX;
 extern CMode3RX mode3RX;
 
+// Bootloader.cpp on target, the test shim on the host: reboot into the
+// STM32 ROM bootloader on request from the KISS host, so the firmware can
+// be reflashed without touching BOOT0 or the board.
+void requestBootloader();
+void checkBootloader();
+
 #endif
 

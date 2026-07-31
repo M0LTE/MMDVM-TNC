@@ -67,6 +67,10 @@ void loop()
 
 int main()
 {
+  // If the last run ended with a bootloader request, jump to the ROM now,
+  // before any peripheral is touched.
+  checkBootloader();
+
   setup();
 
   for (;;)

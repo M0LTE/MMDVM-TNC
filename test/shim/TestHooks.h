@@ -58,6 +58,9 @@ namespace hooks {
   extern bool g_ptt;
   extern bool g_dcd;
 
+  /* Set when the firmware asks for a reboot into the ROM bootloader. */
+  extern bool g_bootloaderRequested;
+
   void reset();
 
   /* Pull complete KISS frames out of g_kissTx, unescaping as we go. Each

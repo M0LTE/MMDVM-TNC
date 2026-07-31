@@ -4,6 +4,10 @@ This repo is a fork of https://github.com/g4klx/MMDVM-TNC. My intention is to of
 
 Standard KISS command over the MMDVM serial port are used, the speed of which is set to 115200 baud, although this can be changed in Config.h at compile time.
 
+## Reflashing in place
+
+Once this firmware is on the board, it can be reflashed over the same serial port with no BOOT0 or reset lines and no unplugging: `./flash-pi.sh` sends a magic KISS frame (type 0x0B, payload `BOOT`) that makes the firmware reboot into the STM32's factory ROM bootloader, then hands the image to stm32flash. Boards whose BOOT0 cannot be driven from the host — the BI7JTA V3F4 needs the plug-in-while-retrying ritual — only have to go through that once more to get onto this firmware; after that the ritual is just the recovery path for a board too broken to answer.
+
 The KISS SET HARDWARE command has two versions that allow it to control the modem (all of these settings may also be set in Config.h at compile time).
 
 A SET HARDWARE command with a single one byte argument sets the mode. The modes are 1200 bps AFSK AX.25 is mode 1 and 9600 bps C4FSK IL2P is mode 2. The mode is shown on the modem LEDs with D-Star showing mode 1 and DMR for mode 2. The other version of the command has three one byte arguments, the first byte being the Receive Level which has a range of 0 to 255, the second byte is the mode 1 Transmit Level which may be between 0 and 255, the third byte is the mode 2 Transmit Level which is also between 0 and 255.

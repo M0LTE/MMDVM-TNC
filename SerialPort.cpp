@@ -210,6 +210,16 @@ void CSerialPort::processMessage()
         DEBUG2("Setting Mode 3 TX Level to", m_buffer[4U]);
       }
       break;
+    case KISS_TYPE_BOOTLOADER:
+      // The exact magic only: a reboot into the bootloader takes the modem
+      // off the air until it is reflashed or reset, so line noise must not
+      // be able to trigger it.
+      if (m_ptr == 5U && m_buffer[1U] == 'B' && m_buffer[2U] == 'O' &&
+          m_buffer[3U] == 'O' && m_buffer[4U] == 'T') {
+        DEBUG1("Rebooting into the bootloader");
+        requestBootloader();
+      }
+      break;
     case KISS_TYPE_DATA_WITH_ACK: {
         if (m_ptr < 3U)
           break;
